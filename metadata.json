@@ -1,0 +1,6 @@
+{
+  "name": "ChronoScope - Mechanical Watch Timegrapher & Regulator",
+  "description": "Precision acoustic watch timing analyzer, rate regulator oscilloscope, BPH detection, amplitude and beat error measurement for mechanical watchmakers.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

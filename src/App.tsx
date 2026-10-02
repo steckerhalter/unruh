@@ -23,7 +23,6 @@ import { AudioEngine } from './services/audioEngine';
 import { globalWatchFingerprinter } from './services/watchFingerprintEngine';
 import { OscilloscopeRateTrend } from './components/OscilloscopeRateTrend';
 import { EscapementOscilloscope } from './components/EscapementOscilloscope';
-import { ClassicTimegrapherTape } from './components/ClassicTimegrapherTape';
 import { MovementSimulatorPanel } from './components/MovementSimulatorPanel';
 import { PositionTester } from './components/PositionTester';
 import { WatchIdentificationCard } from './components/WatchIdentificationCard';
@@ -337,26 +336,6 @@ export default function App() {
             Regulator Console
           </button>
           <button
-            onClick={() => setActiveTab('split')}
-            className={`px-2.5 py-1 rounded-md font-medium transition ${
-              activeTab === 'split'
-                ? 'bg-white text-[#78350f] shadow-xs border border-[#d6a95e]/60 font-bold'
-                : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            Split View
-          </button>
-          <button
-            onClick={() => setActiveTab('classic')}
-            className={`px-2.5 py-1 rounded-md font-medium transition ${
-              activeTab === 'classic'
-                ? 'bg-white text-[#78350f] shadow-xs border border-[#d6a95e]/60 font-bold'
-                : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            Tape Roll
-          </button>
-          <button
             onClick={() => setActiveTab('escapement')}
             className={`px-2.5 py-1 rounded-md font-medium transition ${
               activeTab === 'escapement'
@@ -437,7 +416,7 @@ export default function App() {
 
       {/* Mobile Tab Navigation */}
       <div className="flex md:hidden items-center justify-around px-2 py-1.5 bg-[#fdfcf9] border-b border-[#ded5c5] text-[11px] font-mono overflow-x-auto">
-        {(['oscilloscope', 'split', 'classic', 'escapement', 'positions', 'fingerprints'] as ViewTab[]).map((tab) => (
+        {(['oscilloscope', 'escapement', 'positions', 'fingerprints'] as ViewTab[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -447,17 +426,14 @@ export default function App() {
                 : 'text-stone-600'
             }`}
           >
-            {tab === 'oscilloscope'
-              ? 'Console'
-              : tab === 'classic'
-              ? 'Tape'
-              : tab === 'escapement'
-              ? 'Escapement'
-              : tab === 'positions'
-              ? '6-Pos'
-              : tab === 'fingerprints'
-              ? 'Watch ID'
-              : 'Split'}
+          {
+            {
+              oscilloscope: 'Console',
+              escapement: 'Escapement',
+              positions: '6-Pos',
+              fingerprints: 'Watch ID',
+            }[tab] || 'Console' // Default fallback if tab doesn't match
+          }
           </button>
         ))}
       </div>
@@ -467,7 +443,7 @@ export default function App() {
         {/* ========================================================================= */}
         {/* 2/3 GRAPH ON LEFT + 1/3 NAME & NUMBERS ON RIGHT (AT-A-GLANCE BENCH LAYOUT) */}
         {/* ========================================================================= */}
-        {(activeTab === 'oscilloscope' || activeTab === 'split') ? (
+        {(activeTab === 'oscilloscope') ? (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
             {/* Left Column: 2/3 of screen width (8 of 12 columns) for Graph & Visualizers */}
             <div className="lg:col-span-8 space-y-2.5">
@@ -482,11 +458,6 @@ export default function App() {
                 onTogglePause={() => setIsPaused(!isPaused)}
                 isRunning={isRunning}
               />
-
-              {/* Split View: Escapement pulse waveform below the rate trend */}
-              {activeTab === 'split' && (
-                <EscapementOscilloscope latestBeat={latestBeat} liftAngle={watchConfig.liftAngle} />
-              )}
 
               {/* Movement Simulator Panel (condensed in height, controls docked right) */}
               {isSimulating && (
@@ -748,9 +719,6 @@ export default function App() {
         ) : (
           /* Other Tabs: Classic Tape, Escapement Pulse, 6-Position Log, Watch ID */
           <div className="space-y-3">
-            {activeTab === 'classic' && (
-              <ClassicTimegrapherTape measurements={measurements} targetRate={watchConfig.targetRate} />
-            )}
 
             {activeTab === 'escapement' && (
               <EscapementOscilloscope latestBeat={latestBeat} liftAngle={watchConfig.liftAngle} />

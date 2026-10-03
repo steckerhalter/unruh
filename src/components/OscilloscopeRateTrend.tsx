@@ -14,7 +14,6 @@ import {
   Play,
 } from 'lucide-react';
 
-export type SmoothingLevel = 'raw' | 'smooth';
 export type YScaleMode = 'auto-lock';
 
 interface Props {
@@ -53,7 +52,8 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [yScaleMode] = useState<YScaleMode>('auto-lock');
-  const [smoothingLevel, setSmoothingLevel] = useState<SmoothingLevel>('smooth');
+  // Smooth enabled by default
+  const [isSmoothed, setIsSmoothed] = useState<boolean>(true);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; measurement: BeatMeasurement } | null>(null);
 
   // Auto-lock bounds: recalculates and locks strictly every 5 seconds
@@ -67,7 +67,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   // 1. Calculate window size in beats
   const windowBeats = Math.max(1, Math.round(integrationSec * (bph / 3600)));
 
-  // 2. High-performance O(N) running-sum smoothed data array
+  // 2. High-performance running-sum smoothed data array
   const displayData = useMemo(() => {
     const len = measurements.length;
     if (len === 0) return [];
@@ -98,7 +98,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
     displayDataRef.current = displayData;
   }, [displayData]);
 
-  // Fast calculate bounds
+  // Calculate auto bounds
   const calculateAutoBounds = (data: BeatMeasurement[]) => {
     if (!data || data.length === 0) {
       return { minY: targetRate - 20, maxY: targetRate + 20 };
@@ -142,11 +142,11 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   }, [targetRate]);
 
   // Latest rate measurement
-  const latest = smoothingLevel !== 'raw' && displayData.length > 0
+  const latest = isSmoothed && displayData.length > 0
     ? displayData[displayData.length - 1]
     : measurements[measurements.length - 1];
 
-  // Single-pass statistics over visible window
+  // Statistics over visible window
   const stats = useMemo(() => {
     const len = measurements.length;
     if (len === 0) {
@@ -326,10 +326,9 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
       }
 
       // 3. Trace line
-      const dataToDraw = smoothingLevel !== 'raw' ? displayData : measurements;
+      const dataToDraw = isSmoothed ? displayData : measurements;
       const cutoffTime = now - windowMs;
 
-      // Fast slice to visible points
       let startIdx = 0;
       while (startIdx < dataToDraw.length && dataToDraw[startIdx].timestamp < cutoffTime) {
         startIdx++;
@@ -350,7 +349,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
 
-        if (smoothingLevel !== 'raw' && points.length > 2) {
+        if (isSmoothed && points.length > 2) {
           for (let i = 0; i < points.length - 1; i++) {
             const xc = (points[i].x + points[i + 1].x) / 2;
             const yc = (points[i].y + points[i + 1].y) / 2;
@@ -369,7 +368,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
 
-        if (smoothingLevel !== 'raw' && points.length > 2) {
+        if (isSmoothed && points.length > 2) {
           for (let i = 0; i < points.length - 1; i++) {
             const xc = (points[i].x + points[i + 1].x) / 2;
             const yc = (points[i].y + points[i + 1].y) / 2;
@@ -465,7 +464,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   }, [
     measurements,
     displayData,
-    smoothingLevel,
+    isSmoothed,
     timeWindow,
     yScaleMode,
     targetRate,
@@ -592,6 +591,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
                 {TIME_WINDOW_OPTIONS.map((opt) => (
                   <button
                     key={opt.sec}
+                    type="button"
                     onClick={() => onTimeWindowChange(opt.sec)}
                     className={`py-1 px-1.5 text-[10px] rounded transition text-center ${
                       timeWindow === opt.sec
@@ -605,22 +605,25 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Spline & Action Toggles */}
+            {/* Filter & State Actions */}
             <div className="pt-1.5 border-t border-[#eee5d5] space-y-1">
               <span className="text-[10px] text-stone-500 uppercase tracking-wider block">Filter & State:</span>
+              
               <button
-                onClick={() => {
-                  setSmoothingLevel((prev) =>
-                    prev === 'smooth' ? 'raw' : 'smooth'
-                  );
-                }}
-                className="w-full py-1 px-1.5 text-[10px] bg-[#f5f0e4] hover:bg-[#ede5d5] border border-[#e5decb] text-stone-700 rounded transition text-center"
+                type="button"
+                onClick={() => setIsSmoothed((prev) => !prev)}
+                className={`w-full py-1 px-1.5 text-[10px] rounded transition text-center font-bold ${
+                  isSmoothed
+                    ? 'bg-[#78350f] text-white shadow-xs'
+                    : 'bg-[#f5f0e4] text-stone-600 hover:bg-[#ede5d5] border border-[#e5decb]'
+                }`}
               >
-                {smoothingLevel === 'smooth' ? 'Spline: Smooth' : 'Spline: Raw'}
+                Smooth
               </button>
 
               <div className="grid grid-cols-2 gap-1 pt-0.5">
                 <button
+                  type="button"
                   onClick={onTogglePause}
                   className={`py-1 text-[10px] rounded transition flex items-center justify-center gap-1 ${
                     isPaused
@@ -633,6 +636,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
                   {isPaused ? 'Play' : 'Pause'}
                 </button>
                 <button
+                  type="button"
                   onClick={onClearHistory}
                   className="py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
                   title="Clear graph trace"

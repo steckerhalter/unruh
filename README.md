@@ -25,12 +25,12 @@ Unruh utilizes a specialized Web Audio API signal processing pipeline tuned for 
 
 | Parameter | Default Value | Description |
 | :--- | :--- | :--- |
-| `highPassCutoff` | `1000 Hz` | Eliminates low-frequency ambient rumble, AC hum, and desk vibration. |
-| `bandPassFreq` | `5000 Hz` | Isolates the sharp acoustic resonance of pallet jewel impacts. |
-| `sensitivityThreshold` | `0.08` | Base threshold floor for detecting low-amplitude vintage movements. |
+| `highPassCutoff` | `750 Hz` | Eliminates low-frequency ambient rumble, AC hum, and desk vibration. |
+| `bandPassFreq` | `4500 Hz` | Isolates the sharp acoustic resonance of pallet jewel impacts. |
+| `sensitivityThreshold` | `0.12` | Base threshold floor for detecting low-amplitude vintage movements. |
 | `autoThreshold` | `true` | Dynamic peak threshold tracking for automatic signal locking. |
-| `lockoutRatio` | `0.55` | Refractory period to prevent hairspring and fork echo double-triggering. |
-| `noiseGate` | `0.035` | Noise floor barrier to eliminate background hiss between beat impulses. |
+| `lockoutRatio` | `0.65` | Refractory period to prevent hairspring and fork echo double-triggering. |
+| `noiseGate` | `0.02` | Noise floor barrier to eliminate background hiss between beat impulses. |
 
 ---
 

@@ -38,7 +38,7 @@ export type TimeWindowSec = 15 | 30 | 60 | 300 | 900 | 3600 | 14400;
 
 export interface AudioSettings {
   deviceId: string;
-  gainMultiplier: number; // 1 to 25 (piezo boost)
+  gainMultiplier: number;
   highPassCutoff: number; // 200 to 2000 Hz (cuts table rumble and mains hum)
   bandPassFreq: number; // 2000 to 7000 Hz (pallet jewel resonance)
   sensitivityThreshold: number; // 0.02 to 0.8

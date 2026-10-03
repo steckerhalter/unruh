@@ -261,11 +261,11 @@ export const AudioSettingsModal: React.FC<Props> = ({
                 deviceId: 'default',
                 gainMultiplier: 3000,
                 highPassCutoff: 1000,
-                bandPassFreq: 5000,
-                sensitivityThreshold: 0.08,
+                bandPassFreq: 4500,
+                sensitivityThreshold: 0.12,
                 autoThreshold: true,
-                lockoutRatio: 0.55,
-                noiseGate: 0.035,
+                lockoutRatio: 0.65,
+                noiseGate: 0.02,
               })
             }
             className="text-xs font-mono text-stone-600 hover:text-stone-900"

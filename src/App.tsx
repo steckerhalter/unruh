@@ -67,7 +67,7 @@ export default function App() {
 
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({
     deviceId: 'default',
-    gainMultiplier: 8,
+    gainMultiplier: 3000,
     highPassCutoff: 750,
     bandPassFreq: 4500,
     sensitivityThreshold: 0.12,

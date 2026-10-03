@@ -18,6 +18,9 @@ import {
   WatchConfig,
   SimulatorConfig,
   ViewTab,
+  DEFAULT_WATCH_CONFIG,
+  DEFAULT_AUDIO_SETTINGS,
+  DEFAULT_SIMULATOR_CONFIG,
 } from './types/timegrapher';
 import { AudioEngine } from './services/audioEngine';
 import { globalWatchFingerprinter } from './services/watchFingerprintEngine';
@@ -37,8 +40,6 @@ import {
   Clock,
   Filter,
   Fingerprint,
-  Target,
-  ArrowRight,
 } from 'lucide-react';
 
 export default function App() {
@@ -57,35 +58,11 @@ export default function App() {
   const [integrationSec, setIntegrationSec] = useState<number>(12);
 
   // Settings
-  const [watchConfig, setWatchConfig] = useState<WatchConfig>({
-    bphMode: 'auto',
-    customBph: 21600,
-    effectiveBph: 21600,
-    liftAngle: 52,
-    targetRate: 0.0,
-  });
-
-  const [audioSettings, setAudioSettings] = useState<AudioSettings>({
-    deviceId: 'default',
-    gainMultiplier: 3000,
-    highPassCutoff: 750,
-    bandPassFreq: 4500,
-    sensitivityThreshold: 0.12,
-    autoThreshold: true,
-    lockoutRatio: 0.65,
-    noiseGate: 0.02,
-  });
+  const [watchConfig, setWatchConfig] = useState<WatchConfig>(DEFAULT_WATCH_CONFIG);
+  const [audioSettings, setAudioSettings] = useState<AudioSettings>(DEFAULT_AUDIO_SETTINGS);
 
   // Simulator Configuration
-  const [simConfig, setSimConfig] = useState<SimulatorConfig>({
-    enabled: true,
-    bph: 21600,
-    rateError: 95, // Default to user's example: +95 s/d fast watch, ready for regulation down to 0 s/d
-    beatError: 0.3,
-    amplitude: 275,
-    noiseLevel: 0.04,
-    presetName: 'Fast Runner (+95 s/d) - Regulator Test',
-  });
+  const [simConfig, setSimConfig] = useState<SimulatorConfig>(DEFAULT_SIMULATOR_CONFIG);
 
   // Time Window: 1m (60s) default as requested by user
   const [timeWindow, setTimeWindow] = useState<TimeWindowSec>(60);
@@ -280,7 +257,7 @@ export default function App() {
   const liveRateAvg = useMemo(() => {
     if (recentBeats.length === 0) return latestBeat ? latestBeat.rateErrorSecondsPerDay : 0;
     const sum = recentBeats.reduce((acc, b) => acc + b.rateErrorSecondsPerDay, 0);
-    return sum / recentBeats.length; // 👈 True moving average
+    return sum / recentBeats.length; // True moving average
   }, [recentBeats, latestBeat]);
 
   const liveAmpAvg = useMemo(() => {
@@ -319,7 +296,7 @@ export default function App() {
             <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#f5f0e4] text-[#78350f] border border-[#e5decb]">
               Timegrapher
             </span>
-            </div>
+          </div>
         </div>
 
         {/* Center: Navigation views (Desktop) */}
@@ -425,14 +402,14 @@ export default function App() {
                 : 'text-stone-600'
             }`}
           >
-          {
             {
-              oscilloscope: 'Console',
-              escapement: 'Escapement',
-              positions: '6-Pos',
-              fingerprints: 'Watch ID',
-            }[tab] || 'Console' // Default fallback if tab doesn't match
-          }
+              {
+                oscilloscope: 'Console',
+                escapement: 'Escapement',
+                positions: '6-Pos',
+                fingerprints: 'Watch ID',
+              }[tab] || 'Console'
+            }
           </button>
         ))}
       </div>
@@ -442,7 +419,7 @@ export default function App() {
         {/* ========================================================================= */}
         {/* 2/3 GRAPH ON LEFT + 1/3 NAME & NUMBERS ON RIGHT (AT-A-GLANCE BENCH LAYOUT) */}
         {/* ========================================================================= */}
-        {(activeTab === 'oscilloscope') ? (
+        {activeTab === 'oscilloscope' ? (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
             {/* Left Column: 2/3 of screen width (8 of 12 columns) for Graph & Visualizers */}
             <div className="lg:col-span-8 space-y-2.5">
@@ -500,10 +477,10 @@ export default function App() {
                           Math.abs(liveRateAvg) <= 5
                             ? 'text-emerald-700'
                             : Math.abs(liveRateAvg) <= 15
-                            ? 'text-[#92400e]'
-                            : Math.abs(liveRateAvg) <= 30
-                            ? 'text-amber-700'
-                            : 'text-rose-700'
+                              ? 'text-[#92400e]'
+                              : Math.abs(liveRateAvg) <= 30
+                                ? 'text-amber-700'
+                                : 'text-rose-700'
                         }`}
                       >
                         {liveRateAvg >= 0 ? '+' : ''}
@@ -524,17 +501,17 @@ export default function App() {
                             Math.abs(liveRateAvg) <= 5
                               ? 'bg-emerald-100 text-emerald-800'
                               : Math.abs(liveRateAvg) <= 15
-                              ? 'bg-[#fef3c7] text-[#78350f] border border-[#fde68a]'
-                              : Math.abs(liveRateAvg) <= 30
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-rose-100 text-rose-800'
+                                ? 'bg-[#fef3c7] text-[#78350f] border border-[#fde68a]'
+                                : Math.abs(liveRateAvg) <= 30
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-rose-100 text-rose-800'
                           }`}
                         >
                           {Math.abs(liveRateAvg) <= 5
                             ? '● Chronometer Grade'
                             : liveRateAvg > 0
-                            ? '● Fast (+)'
-                            : '● Slow (-)'}
+                              ? '● Fast (+)'
+                              : '● Slow (-)'}
                         </span>
                       ) : (
                         <span className="text-stone-400 text-[10px]">Awaiting Signal</span>
@@ -548,7 +525,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Cards 2 & 3 Side-by-Side: AMPLITUDE & BEAT ERROR (Saves 50% vertical space!) */}
+                {/* Cards 2 & 3 Side-by-Side: AMPLITUDE & BEAT ERROR */}
                 <div className="grid grid-cols-2 gap-2">
                   {/* Amplitude */}
                   <div className="px-3 py-2 bg-white border border-[#ded5c5] rounded-xl shadow-xs flex flex-col justify-between">
@@ -576,8 +553,8 @@ export default function App() {
                             liveAmpAvg >= 250 && liveAmpAvg <= 315
                               ? 'text-emerald-700'
                               : liveAmpAvg < 240
-                              ? 'text-amber-700'
-                              : 'text-rose-700'
+                                ? 'text-amber-700'
+                                : 'text-rose-700'
                           }`}
                         >
                           {liveAmpAvg >= 250 && liveAmpAvg <= 315 ? '● Optimal' : liveAmpAvg < 240 ? '● Low' : '● Knocking'}
@@ -691,7 +668,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Stabilization Filter Period (controls docked horizontally to the right) */}
+                  {/* Stabilization Filter Period */}
                   <div className="flex items-center justify-start gap-2 pt-1.5 border-t border-[#eee5d5] text-[10px] font-mono text-stone-600">
                     <span className="flex items-center gap-1">
                       <Filter className="w-3 h-3 text-[#78350f]" />
@@ -720,7 +697,6 @@ export default function App() {
         ) : (
           /* Other Tabs: Escapement Pulse, 6-Position Log, Watch ID */
           <div className="space-y-3">
-
             {activeTab === 'escapement' && (
               <EscapementOscilloscope latestBeat={latestBeat} liftAngle={watchConfig.liftAngle} />
             )}

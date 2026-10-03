@@ -40,10 +40,9 @@ interface Props {
 
 const TIME_WINDOW_OPTIONS: { sec: TimeWindowSec; label: string }[] = [
   { sec: 15, label: '15s' },
-  { sec: 30, label: '30s' },
   { sec: 60, label: '1m' },
-  { sec: 300, label: '5m' },
-  { sec: 900, label: '15m' },
+  { sec: 600, label: '10m' },
+  { sec: 3600, label: '1h' },
 ];
 
 export const OscilloscopeRateTrend: React.FC<Props> = ({
@@ -677,28 +676,28 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
                   {smoothingLevel === 'smooth' ? 'Spline: Smooth' : 'Spline: Raw'}
               </button>
 
-                  <div className="grid grid-cols-2 gap-1 pt-0.5">
-                    <button
-                      onClick={onTogglePause}
-                      className={`py-1 text-[10px] rounded transition flex items-center justify-center gap-1 ${
-                        isPaused
-                          ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
-                          : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
-                      }`}
-                      title={isPaused ? 'Resume trace' : 'Freeze trace'}
-                    >
-                      {isPaused ? <Play className="w-2.5 h-2.5" /> : <Pause className="w-2.5 h-2.5" />}
-                      {isPaused ? 'Play' : 'Pause'}
-                    </button>
-                    <button
-                      onClick={onClearHistory}
-                      className="py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
-                      title="Clear graph trace"
-                    >
-                      <RotateCcw className="w-2.5 h-2.5" />
-                      Clear
-                    </button>
-                  </div>
+              <div className="grid grid-cols-2 gap-1 pt-0.5">
+                <button
+                  onClick={onTogglePause}
+                  className={`py-1 text-[10px] rounded transition flex items-center justify-center gap-1 ${
+                    isPaused
+                      ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
+                      : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
+                  }`}
+                  title={isPaused ? 'Resume trace' : 'Freeze trace'}
+                >
+                  {isPaused ? <Play className="w-2.5 h-2.5" /> : <Pause className="w-2.5 h-2.5" />}
+                  {isPaused ? 'Play' : 'Pause'}
+                </button>
+                <button
+                  onClick={onClearHistory}
+                  className="py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
+                  title="Clear graph trace"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                  Clear
+                </button>
+              </div>
                     </div>
           </div>
 

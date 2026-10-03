@@ -21,7 +21,6 @@ interface Props {
   onTimeWindowChange: (w: TimeWindowSec) => void;
   onClearHistory: () => void;
   isPaused: boolean;
-  onTogglePause: () => void;
   isRunning?: boolean;
   integrationSec?: number;
   bph?: number;

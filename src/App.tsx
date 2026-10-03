@@ -433,7 +433,6 @@ export default function App() {
                 onTimeWindowChange={setTimeWindow}
                 onClearHistory={handleClearHistory}
                 isPaused={isPaused}
-                onTogglePause={() => setIsPaused(!isPaused)}
                 isRunning={isRunning}
               />
 

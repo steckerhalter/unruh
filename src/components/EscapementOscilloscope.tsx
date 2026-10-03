@@ -1,5 +1,5 @@
 /**
- * ChronoScope - Escapement Pulse Waveform Oscilloscope
+ * Unruh - Escapement Pulse Waveform Oscilloscope
  * Visualizes the 3 acoustic impacts of the Swiss lever escapement:
  * 1. Unlocking (t1), 2. Impulse (t2), 3. Drop/Banking (t3) to compute Amplitude.
  * Styled in warm creamy parchment aesthetic with yellow/brown/khaki accents.

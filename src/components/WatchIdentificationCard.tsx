@@ -1,5 +1,5 @@
 /**
- * ChronoScope - Acoustic Watch Identification & Sound Profile Card
+ * Unruh - Acoustic Watch Identification & Sound Profile Card
  * Recognizes watch movements (e.g. Eloga, Seiko, ETA) by their acoustic sound signature.
  * Ultra-condensed in height with a warm yellow/brown/khaki horological aesthetic.
  */
@@ -175,7 +175,7 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
             <form onSubmit={handleSaveWatch} className="p-4 space-y-3">
               <p className="text-xs text-stone-600 font-mono">
                 Give this watch a name (e.g. <em>Eloga Vintage</em>, <em>Seiko NH35</em>).
-                ChronoScope will save its acoustic resonance and automatically recognize it in future sessions!
+                Unruh will save its acoustic resonance and automatically recognize it in future sessions!
               </p>
 
               <div className="space-y-1">

@@ -24,7 +24,7 @@ export const OfflineIndicator: React.FC = () => {
   return (
     <div className="fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-lg bg-amber-500/90 border border-amber-400 px-3 py-1.5 text-xs font-mono text-slate-950 shadow-lg font-medium backdrop-blur">
       <WifiOff className="w-4 h-4 text-slate-950" />
-      <span>Offline Mode — ChronoScope DSP running locally.</span>
+      <span>Offline Mode — Unruh DSP running locally.</span>
     </div>
   );
 };

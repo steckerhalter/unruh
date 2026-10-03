@@ -1,5 +1,5 @@
 /**
- * ChronoScope - Oscilloscope Rate Trend Timeline
+ * Unruh - Oscilloscope Rate Trend Timeline
  * Precision watchmaker rate regulator oscilloscope with rock-solid framing,
  * warm walnut brown 0 s/d target line, golden amber rate trace,
  * and controls docked to the right to preserve vertical canvas height.

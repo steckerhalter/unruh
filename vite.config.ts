@@ -15,8 +15,8 @@ export default defineConfig(() => {
         includeAssets: ['favicon.ico', 'icon.svg', 'apple-touch-icon.png'],
         manifest: {
           id: '/',
-          name: 'ChronoScope Mechanical Watch Timegrapher',
-          short_name: 'ChronoScope',
+          name: 'Unruh Mechanical Watch Timegrapher',
+          short_name: 'Unruh',
           description: 'Precision mechanical watch timing, rate regulator oscilloscope, amplitude & beat error analyzer.',
           theme_color: '#07090e',
           background_color: '#07090e',

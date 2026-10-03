@@ -1,5 +1,5 @@
 /**
- * ChronoScope Web Audio DSP Engine
+ * Unruh Web Audio DSP Engine
  * Tailored specifically for piezo microphones & acoustic watch escapement detection.
  * Computes daily rate deviation on paired oscillation cycles (T_tick + T_tock) to eliminate
  * the beat error jump artifact, with sub-sample peak interpolation and integration filtering.

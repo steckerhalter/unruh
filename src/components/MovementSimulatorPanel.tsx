@@ -1,5 +1,5 @@
 /**
- * ChronoScope - Interactive Watch Movement Simulator & Virtual Regulator
+ * Unruh - Interactive Watch Movement Simulator & Virtual Regulator
  * Allows testing the app immediately, with presets and a virtual regulator arm
  * to test pulling a fast watch down to the 0 s/d target line in real time.
  * Condensed in height with controls docked to the right and warm yellow/brown/khaki styling.

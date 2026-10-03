@@ -1,5 +1,5 @@
 /**
- * ChronoScope - Audio & Piezo Microphone Calibration Modal
+ * Unruh - Audio & Piezo Microphone Calibration Modal
  * Solves the signal detection challenges of piezo pickups that fail in software like TG.
  * Styled in warm creamy horological bench aesthetic with yellow/brown/khaki accents.
  */

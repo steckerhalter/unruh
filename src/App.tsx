@@ -1,5 +1,5 @@
 /**
- * ChronoScope - Mechanical Watch Timegrapher & Regulator
+ * Unruh - Mechanical Watch Timegrapher & Regulator
  * Precision acoustic watch timing analyzer, rate regulator oscilloscope,
  * BPH auto-detection, amplitude & beat error measurement.
  * Unified 2/3 + 1/3 at-a-glance layout with creamy Swiss horological bench aesthetic
@@ -314,7 +314,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-base font-bold tracking-tight text-stone-900 font-display">
-              ChronoScope
+              Unruh
             </span>
             <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#f5f0e4] text-[#78350f] border border-[#e5decb]">
               Timegrapher

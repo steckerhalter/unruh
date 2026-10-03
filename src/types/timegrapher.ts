@@ -1,5 +1,5 @@
 /**
- * ChronoScope - Mechanical Watch Timegrapher & Regulator Types
+ * Unruh - Mechanical Watch Timegrapher & Regulator Types
  */
 
 export type BphOption = 18000 | 19800 | 21600 | 25200 | 28800 | 36000;

@@ -1,5 +1,5 @@
 /**
- * ChronoScope - Watch Acoustic Fingerprinting & Identification Engine
+ * Unruh - Watch Acoustic Fingerprinting & Identification Engine
  * Recognizes watch movements by their acoustic signature (BPH, escapement resonance,
  * impulse duration Delta-t, and harmonic spectrum).
  * Features Schmitt-trigger hysteresis to eliminate rapid jumping between Identified and Unknown,

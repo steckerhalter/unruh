@@ -1,5 +1,5 @@
 /**
- * ChronoScope - 6-Position Horological Multi-Positional Variance Tester
+ * Unruh - 6-Position Horological Multi-Positional Variance Tester
  * Allows testing watches in CH, CD, 6H, 9H, 3H, 12H to measure isochronism and balance poising error.
  * Styled in warm creamy horological bench aesthetic with yellow/brown/khaki accents.
  */

@@ -17,7 +17,7 @@ export const PWAInstallButton: React.FC = () => {
       <button
         onClick={install}
         className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-bold rounded-lg bg-[#fef3c7] border border-[#fde68a] text-[#78350f] hover:bg-[#fde68a] transition shadow-xs"
-        title="Install ChronoScope as native Android / Desktop app"
+        title="Install Unruh as native Android / Desktop app"
       >
         <Smartphone className="w-3.5 h-3.5 text-[#78350f]" />
         <span>Install App</span>
@@ -49,7 +49,7 @@ export const PWAInstallButton: React.FC = () => {
               <p className="mt-3 text-xs text-stone-600 font-mono leading-relaxed">
                 1. Tap the <strong className="text-[#78350f]">Share</strong> icon in Safari toolbar.<br />
                 2. Scroll down and tap <strong className="text-[#78350f]">Add to Home Screen</strong>.<br />
-                3. ChronoScope will launch full-screen like a native app.
+                3. Unruh will launch full-screen like a native app.
               </p>
               <button
                 onClick={() => setShowIOSGuide(false)}

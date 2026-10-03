@@ -19,21 +19,6 @@ Webapp: https://steckerhalter.github.io/unruh/
 
 ---
 
-## 🛠 Audio DSP Default Configuration
-
-Unruh utilizes a specialized Web Audio API signal processing pipeline tuned for steel-on-ruby watch escapement impacts:
-
-| Parameter | Default Value | Description |
-| :--- | :--- | :--- |
-| `highPassCutoff` | `750 Hz` | Eliminates low-frequency ambient rumble, AC hum, and desk vibration. |
-| `bandPassFreq` | `4500 Hz` | Isolates the sharp acoustic resonance of pallet jewel impacts. |
-| `sensitivityThreshold` | `0.12` | Base threshold floor for detecting low-amplitude vintage movements. |
-| `autoThreshold` | `true` | Dynamic peak threshold tracking for automatic signal locking. |
-| `lockoutRatio` | `0.65` | Refractory period to prevent hairspring and fork echo double-triggering. |
-| `noiseGate` | `0.02` | Noise floor barrier to eliminate background hiss between beat impulses. |
-
----
-
 
 ## 🚀 Getting Started
 

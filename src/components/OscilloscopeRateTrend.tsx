@@ -19,13 +19,7 @@ import {
 export type SmoothingLevel = 'raw' | 'smooth';
 
 export type YScaleMode =
-  | 'regulator-fast'      // -20 to +160 s/d: Target near bottom, max resolution for fast watches
-  | 'regulator-fast-wide' // -30 to +320 s/d: Coarse high-beat fast watches
-  | 'regulator-slow'      // -160 to +20 s/d: Target near top, max resolution for slow watches
-  | 'centered-fine'       // -20 to +20 s/d: Chronometer grade regulation
-  | 'centered-standard'   // -50 to +50 s/d: Balanced centered view
-  | 'centered-wide'       // -100 to +100 s/d: Wide variance view
-  | 'auto-lock';          // Smart Auto-Frame: Snaps to current watch rate with generous headroom, then locks firmly
+  | 'auto-lock';
 
 interface Props {
   measurements: BeatMeasurement[];
@@ -61,7 +55,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Default to 'regulator-fast' (-20 to +160 s/d)
-  const [yScaleMode, setYScaleMode] = useState<YScaleMode>('regulator-fast');
+  const [yScaleMode, setYScaleMode] = useState<YScaleMode>('auto-lock');
   const [smoothingLevel, setSmoothingLevel] = useState<SmoothingLevel>('smooth');
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; measurement: BeatMeasurement } | null>(null);
 
@@ -176,31 +170,8 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
       ctx.fillRect(0, 0, width, height);
 
       // Determine Y scale bounds
-      let minY = -20;
-      let maxY = 160;
-
-      if (yScaleMode === 'regulator-fast') {
-        minY = -20;
-        maxY = 160;
-      } else if (yScaleMode === 'regulator-fast-wide') {
-        minY = -30;
-        maxY = 320;
-      } else if (yScaleMode === 'regulator-slow') {
-        minY = -160;
-        maxY = 20;
-      } else if (yScaleMode === 'centered-fine') {
-        minY = -20;
-        maxY = 20;
-      } else if (yScaleMode === 'centered-standard') {
-        minY = -50;
-        maxY = 50;
-      } else if (yScaleMode === 'centered-wide') {
-        minY = -100;
-        maxY = 100;
-      } else if (yScaleMode === 'auto-lock') {
-        minY = autoLockedBounds.minY;
-        maxY = autoLockedBounds.maxY;
-      }
+      let minY = autoLockedBounds.minY;
+      let maxY = autoLockedBounds.maxY;
 
       // Coordinate transformers
       const paddingLeft = 56;
@@ -599,67 +570,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* Regulator Scale Presets */}
-            <div className="pt-1.5 border-t border-[#eee5d5] space-y-1">
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block">Scale Mode:</span>
-              <button
-                onClick={() => setYScaleMode('regulator-fast')}
-                className={`w-full py-1 px-1.5 text-[10px] rounded transition text-left flex items-center justify-between ${
-                  yScaleMode === 'regulator-fast'
-                    ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
-                    : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
-                }`}
-                title="Target 0 at bottom (-20 to +160 s/d). Perfect for fast watches."
-              >
-                <span>Fast (0→+160)</span>
-                {yScaleMode === 'regulator-fast' && <span className="w-1.5 h-1.5 rounded-full bg-[#78350f]" />}
-              </button>
-
-              <button
-                onClick={() => setYScaleMode('regulator-slow')}
-                className={`w-full py-1 px-1.5 text-[10px] rounded transition text-left flex items-center justify-between ${
-                  yScaleMode === 'regulator-slow'
-                    ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
-                    : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
-                }`}
-                title="Target 0 at top (-160 to +20 s/d). For slow watches."
-              >
-                <span>Slow (-160→0)</span>
-                {yScaleMode === 'regulator-slow' && <span className="w-1.5 h-1.5 rounded-full bg-[#78350f]" />}
-              </button>
-
-              <button
-                onClick={() => {
-                  setYScaleMode('auto-lock');
-                  handleReframe();
-                }}
-                className={`w-full py-1 px-1.5 text-[10px] rounded transition text-left flex items-center justify-between ${
-                  yScaleMode === 'auto-lock'
-                    ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
-                    : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
-                }`}
-              >
-                <span className="flex items-center gap-1">
-                  <Lock className="w-2.5 h-2.5 text-[#78350f]" /> Auto-Lock
-                </span>
-                {yScaleMode === 'auto-lock' && <span className="w-1.5 h-1.5 rounded-full bg-[#78350f]" />}
-              </button>
-
-              {/* Other Scales */}
-              <select
-                value={yScaleMode}
-                onChange={(e) => setYScaleMode(e.target.value as YScaleMode)}
-                className="w-full bg-[#f5f0e4] border border-[#e5decb] text-stone-800 rounded px-1.5 py-1 text-[10px] focus:outline-none"
-              >
-                <option value="regulator-fast">Fast (0→+160)</option>
-                <option value="regulator-fast-wide">Coarse (0→+320)</option>
-                <option value="regulator-slow">Slow (-160→0)</option>
-                <option value="centered-fine">±20 s/d (Fine)</option>
-                <option value="centered-standard">±50 s/d (Std)</option>
-                <option value="centered-wide">±100 s/d (Wide)</option>
-              </select>
             </div>
 
             {/* Spline & Action Toggles */}

@@ -24,7 +24,7 @@ interface Props {
   isRunning?: boolean;
   integrationSec?: number;
   bph?: number;
-  isInitializing?: number;
+  isInitializing?: boolean;
 }
 
 const TIME_WINDOW_OPTIONS: { sec: TimeWindowSec; label: string }[] = [
@@ -44,7 +44,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   onClearHistory,
   isPaused,
   isRunning = true,
-  isInitializing,
+  isInitializing = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -419,43 +419,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.fill();
       }
 
-      // 6. Standby Overlay
-      if (isInitializing) {
-        // Overlay box for Audio Initialization state
-        ctx.fillStyle = 'rgba(250, 247, 240, 0.94)';
-        ctx.fillRect(paddingLeft + 10, paddingTop + plotHeight / 2 - 32, plotWidth - 20, 64);
-        ctx.strokeStyle = '#b45309';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(paddingLeft + 10, paddingTop + plotHeight / 2 - 32, plotWidth - 20, 64);
-
-        // Heading
-        ctx.fillStyle = '#b45309';
-        ctx.font = '700 12px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('Initializing Audio Input...', width / 2, paddingTop + plotHeight / 2 - 8);
-
-        // Subtitle
-        ctx.fillStyle = '#78716c';
-        ctx.font = '11px sans-serif';
-        ctx.fillText('... and keep you!', width / 2, paddingTop + plotHeight / 2 + 14);
-      } else if (!isRunning && measurements.length === 0) {
-        // Overlay box for Standby state
-        ctx.fillStyle = 'rgba(250, 247, 240, 0.94)';
-        ctx.fillRect(paddingLeft + 10, paddingTop + plotHeight / 2 - 32, plotWidth - 20, 64);
-        ctx.strokeStyle = '#ded5c5';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(paddingLeft + 10, paddingTop + plotHeight / 2 - 32, plotWidth - 20, 64);
-
-        ctx.fillStyle = '#78350f';
-        ctx.font = '700 12px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('STANDBY — click "Livne Mic" or "Simulate" to graph', width / 2, paddingTop + plotHeight / 2 - 8);
-
-        ctx.fillStyle = '#78716c';
-        ctx.font = '11px sans-serif';
-        ctx.fillText('May God bless you ...', width / 2, paddingTop + plotHeight / 2 + 14);
-      }
-
       ctx.restore();
 
       // Ensure animation keeps looping while initializing or active
@@ -479,6 +442,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
     autoLockedBounds,
     isPaused,
     isRunning,
+    isInitializing,
     hoverPoint,
     latest,
   ]);
@@ -563,6 +527,40 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
             onMouseLeave={handleMouseLeave}
             className="w-full h-full cursor-crosshair block"
           />
+
+          {/* HTML Overlay: Initializing Audio State */}
+          {isInitializing && (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#faf7f0]/80 backdrop-blur-[2px] transition-all z-20">
+              <div className="flex items-center gap-3 px-5 py-3.5 bg-white border-2 border-[#b45309] rounded-xl shadow-lg animate-pulse">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#b45309] opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-[#b45309]"></span>
+                </span>
+                <div className="flex flex-col">
+                  <span className="font-mono font-bold text-xs text-[#b45309] tracking-wider">
+                    Initializing Audio Input
+                  </span>
+                  <span className="text-[11px] text-[#78716c]">
+                    May God bless you...
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* HTML Overlay: Standby State */}
+          {!isInitializing && !isRunning && measurements.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#faf7f0]/90 pointer-events-none z-10">
+              <div className="flex flex-col items-center justify-center px-6 py-4 bg-white border border-[#ded5c5] rounded-xl shadow-md text-center max-w-sm">
+                <span className="font-mono font-bold text-xs text-[#78350f] tracking-wider mb-1">
+                  STANDBY
+                </span>
+                <span className="font-mono text-xs text-[#78716c]">
+                  Click <b>Live Mic</b> or <b>Simulate</b> to graph
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Hover Probe Tooltip */}
           {hoverPoint && (

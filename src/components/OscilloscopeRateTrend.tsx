@@ -310,16 +310,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.lineTo(width - paddingRight, targetY);
         ctx.stroke();
         ctx.setLineDash([]);
-
-        ctx.fillStyle = '#78350f';
-        ctx.fillRect(width - paddingRight - 84, targetY - 9, 82, 18);
-        ctx.strokeStyle = '#5c2b0c';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(width - paddingRight - 84, targetY - 9, 82, 18);
-        ctx.fillStyle = '#fef8e7';
-        ctx.font = '700 9px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(`TARGET: 0 s/d`, width - paddingRight - 43, targetY + 3.5);
       }
 
       // 3. Trace line

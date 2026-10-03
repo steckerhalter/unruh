@@ -312,11 +312,14 @@ export default function App() {
           >
             <Clock className="w-4 h-4" />
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-3">
             <span className="text-base font-bold tracking-tight text-stone-900 font-display">
               ChronoScope
             </span>
-          </div>
+            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#f5f0e4] text-[#78350f] border border-[#e5decb]">
+              Timegrapher
+            </span>
+            </div>
         </div>
 
         {/* Center: Navigation views (Desktop) */}

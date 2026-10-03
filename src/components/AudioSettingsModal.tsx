@@ -145,13 +145,12 @@ export const AudioSettingsModal: React.FC<Props> = ({
           <div className="space-y-1">
             <div className="flex justify-between text-xs font-mono">
               <span className="text-stone-700 font-semibold">Piezo Pre-Amp Boost:</span>
-              <span className="text-[#92400e] font-bold">{localSettings.gainMultiplier}x</span>
             </div>
             <input
               type="range"
               min="1"
-              max="25"
-              step="1"
+              max="5000"
+              step="100"
               value={localSettings.gainMultiplier}
               onChange={(e) =>
                 setLocalSettings({ ...localSettings, gainMultiplier: parseInt(e.target.value, 10) })
@@ -159,9 +158,8 @@ export const AudioSettingsModal: React.FC<Props> = ({
               className="w-full accent-[#b45309] cursor-pointer"
             />
             <div className="flex justify-between text-[10px] font-mono text-stone-400">
-              <span>1x (Line in)</span>
-              <span>8x (Nominal Piezo)</span>
-              <span>25x (Faint Pocket Watch)</span>
+              <span>Min</span>
+              <span>Max</span>
             </div>
           </div>
 
@@ -261,13 +259,13 @@ export const AudioSettingsModal: React.FC<Props> = ({
             onClick={() =>
               setLocalSettings({
                 deviceId: 'default',
-                gainMultiplier: 8,
-                highPassCutoff: 750,
-                bandPassFreq: 4500,
-                sensitivityThreshold: 0.12,
+                gainMultiplier: 3000,
+                highPassCutoff: 1000,
+                bandPassFreq: 5000,
+                sensitivityThreshold: 0.08,
                 autoThreshold: true,
-                lockoutRatio: 0.65,
-                noiseGate: 0.02,
+                lockoutRatio: 0.55,
+                noiseGate: 0.035,
               })
             }
             className="text-xs font-mono text-stone-600 hover:text-stone-900"

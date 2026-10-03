@@ -1,5 +1,7 @@
 # ⏱️ Unruh — Precision Watchmaker Timegrapher
 
+Webapp: https://steckerhalter.github.io/unruh/
+
 **Unruh** is an open-source, web-based mechanical watch timing and diagnostic tool. Designed for watchmakers, restorers, and horology enthusiasts, Unruh leverages high-sample-rate web audio processing to measure mechanical movement performance—including daily rate error ($\text{s/d}$), balance amplitude, beat error, and acoustic signature identification—directly from your browser using standard piezo acoustic sensors or high-sensitivity microphones.
 
 ---
@@ -34,6 +36,9 @@ Unruh utilizes a specialized Web Audio API signal processing pipeline tuned for 
 
 
 ## 🚀 Getting Started
+
+This guide is for local installation and development. If you don't need that, you can use the online version directly in your browser:
+https://steckerhalter.github.io/unruh/
 
 ### Prerequisites
 
@@ -79,9 +84,9 @@ Unruh utilizes a specialized Web Audio API signal processing pipeline tuned for 
 Contributions are welcome! Please feel free to open an issue or submit a pull request for new caliber presets, acoustic filtering enhancements, or UI improvements.
 
 1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/NewFeature`)
-3. Commit your Changes (`git commit -m 'Add NewFeature'`)
-4. Push to the Branch (`git push origin feature/NewFeature`)
+2. Create your branch (`git checkout -b branch`)
+3. Commit your changes (`git commit -m 'dirty dozen optimization'`)
+4. Push to the Branch (`git push origin branch`)
 5. Open a Pull Request
 
 ---

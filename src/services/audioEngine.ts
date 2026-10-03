@@ -6,6 +6,10 @@
  */
 
 import {
+  DEFAULT_AUDIO_SETTINGS,
+  DEFAULT_WATCH_CONFIG,
+} from '../config/defaults';
+import {
   AcousticSignature,
   AudioSettings,
   BeatMeasurement,
@@ -38,25 +42,11 @@ export class AudioEngine {
   public onAutoBphDetected?: (detectedBph: BphOption) => void;
   public onAcousticSignature?: (signature: AcousticSignature) => void;
 
-  // Settings
-  private audioSettings: AudioSettings = {
-    deviceId: 'default',
-    gainMultiplier: 3000,
-    highPassCutoff: 750, // Hz
-    bandPassFreq: 4500, // Hz
-    sensitivityThreshold: 0.12,
-    autoThreshold: true,
-    lockoutRatio: 0.65,
-    noiseGate: 0.02,
-  };
-
-  private watchConfig: WatchConfig = {
-    bphMode: 'auto',
-    customBph: 21600,
-    effectiveBph: 21600,
-    liftAngle: 52,
-    targetRate: 0.0,
-  };
+  // ---------------------------------------------------------------------------
+  // 1. USE CENTRAL DEFAULTS AS INITIAL STATE
+  // ---------------------------------------------------------------------------
+  private audioSettings: AudioSettings = { ...DEFAULT_AUDIO_SETTINGS };
+  private watchConfig: WatchConfig = { ...DEFAULT_WATCH_CONFIG };
 
   // DSP internal state
   private beatCounter: number = 0;
@@ -75,7 +65,16 @@ export class AudioEngine {
   // Recent intervals for auto-BPH detection
   private recentIntervalsMs: number[] = [];
 
-  constructor() {
+  constructor(
+    initialAudioSettings?: Partial<AudioSettings>,
+    initialWatchConfig?: Partial<WatchConfig>
+  ) {
+    if (initialAudioSettings) {
+      this.audioSettings = { ...this.audioSettings, ...initialAudioSettings };
+    }
+    if (initialWatchConfig) {
+      this.watchConfig = { ...this.watchConfig, ...initialWatchConfig };
+    }
     this.updateLockoutSamples(48000);
   }
 
@@ -127,10 +126,11 @@ export class AudioEngine {
       this.totalProcessedSamples = 0;
       this.lastBeatSampleTime = 0;
 
+      const activeDeviceId = deviceId || this.audioSettings.deviceId;
+
       const constraints: MediaStreamConstraints = {
         audio: {
-          deviceId: deviceId && deviceId !== 'default' ? { exact: deviceId } : undefined,
-          // Disable browser speech filtering so watch clicks are preserved
+          deviceId: activeDeviceId && activeDeviceId !== 'default' ? { exact: activeDeviceId } : undefined,
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
@@ -140,28 +140,33 @@ export class AudioEngine {
       this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       this.sourceNode = this.audioCtx.createMediaStreamSource(this.mediaStream);
 
-      // Piezo gain stage
-      this.gainNode = this.audioCtx.createGain();
-      this.gainNode.gain.setValueAtTime(this.audioSettings.gainMultiplier, this.audioCtx.currentTime);
+      // -----------------------------------------------------------------------
+      // 2. EXPLICITLY INITIALIZE NODES WITH THE SINGLE SOURCE OF TRUTH
+      // -----------------------------------------------------------------------
+      const now = this.audioCtx.currentTime;
 
-      // High-pass filter to strip 50Hz/60Hz mains hum, wind, mechanical desk thuds
+      // Gain Node
+      this.gainNode = this.audioCtx.createGain();
+      this.gainNode.gain.setValueAtTime(this.audioSettings.gainMultiplier, now);
+
+      // High-Pass Node
       this.highPassNode = this.audioCtx.createBiquadFilter();
       this.highPassNode.type = 'highpass';
-      this.highPassNode.frequency.setValueAtTime(this.audioSettings.highPassCutoff, this.audioCtx.currentTime);
-      this.highPassNode.Q.setValueAtTime(0.707, this.audioCtx.currentTime);
+      this.highPassNode.frequency.setValueAtTime(this.audioSettings.highPassCutoff, now);
+      this.highPassNode.Q.setValueAtTime(0.707, now);
 
-      // Band-pass filter to isolate the metallic pallet fork jewel strike (~3.5kHz to ~5.5kHz)
+      // Band-Pass Node
       this.bandPassNode = this.audioCtx.createBiquadFilter();
       this.bandPassNode.type = 'bandpass';
-      this.bandPassNode.frequency.setValueAtTime(this.audioSettings.bandPassFreq, this.audioCtx.currentTime);
-      this.bandPassNode.Q.setValueAtTime(1.8, this.audioCtx.currentTime);
+      this.bandPassNode.frequency.setValueAtTime(this.audioSettings.bandPassFreq, now);
+      this.bandPassNode.Q.setValueAtTime(1.8, now);
 
-      // Analyser for visual inspection and levels
+      // Analyser Node
       this.analyserNode = this.audioCtx.createAnalyser();
       this.analyserNode.fftSize = 1024;
       this.analyserNode.smoothingTimeConstant = 0.2;
 
-      // ScriptProcessor for precise sample-by-sample peak detection
+      // ScriptProcessor Node
       this.processorNode = this.audioCtx.createScriptProcessor(2048, 1, 1);
       this.processorNode.onaudioprocess = (e) => this.processAudioBuffer(e);
 
@@ -173,7 +178,7 @@ export class AudioEngine {
       this.bandPassNode.connect(this.processorNode);
 
       const muteGain = this.audioCtx.createGain();
-      muteGain.gain.setValueAtTime(0, this.audioCtx.currentTime);
+      muteGain.gain.setValueAtTime(0, now);
       this.processorNode.connect(muteGain);
       muteGain.connect(this.audioCtx.destination);
 
@@ -183,6 +188,19 @@ export class AudioEngine {
     } catch (err) {
       console.error('Error starting audio input:', err);
       return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3. ADD A RESET METHOD TO RESTORE CENTRAL DEFAULTS AT ANY TIME
+  // ---------------------------------------------------------------------------
+  public resetToDefaults() {
+    this.audioSettings = { ...DEFAULT_AUDIO_SETTINGS };
+    this.watchConfig = { ...DEFAULT_WATCH_CONFIG };
+
+    if (this.audioCtx && this.isRunning) {
+      this.updateAudioSettings(this.audioSettings);
+      this.updateWatchConfig(this.watchConfig);
     }
   }
 
@@ -235,7 +253,6 @@ export class AudioEngine {
     this._simAmplitude = amplitudeDeg;
     this._simNoise = noiseLevel;
 
-    // Simulation loop generating mechanical escapement pulses
     let isTick = true;
     const scheduleNextSimBeat = () => {
       if (!this.isSimulating || !this.audioCtx) return;
@@ -319,7 +336,6 @@ export class AudioEngine {
     const sampleRate = event.inputBuffer.sampleRate;
     const len = inputBuffer.length;
 
-    // Calculate RMS and Peak for level meter
     let sumSquares = 0;
     let peak = 0;
     for (let i = 0; i < len; i++) {
@@ -333,7 +349,6 @@ export class AudioEngine {
       this.onLevel(rms, peak);
     }
 
-    // Adaptive noise floor tracking
     this.backgroundNoiseLevel = this.backgroundNoiseLevel * 0.95 + rms * 0.05;
 
     let threshold = this.audioSettings.sensitivityThreshold;
@@ -342,15 +357,12 @@ export class AudioEngine {
       this.adaptiveThreshold = threshold;
     }
 
-    // Monotonic integer sample index for sample-accurate timing
     const bufferStartSample = this.totalProcessedSamples;
 
     for (let i = 1; i < len - 1; i++) {
       const absVal = Math.abs(inputBuffer[i]);
 
-      // Local peak detection: must be above threshold and higher than immediate neighbors
       if (absVal > threshold && absVal >= Math.abs(inputBuffer[i - 1]) && absVal > Math.abs(inputBuffer[i + 1])) {
-        // Parabolic sub-sample peak interpolation for microsecond precision
         const y0 = Math.abs(inputBuffer[i - 1]);
         const y1 = absVal;
         const y2 = Math.abs(inputBuffer[i + 1]);
@@ -364,7 +376,7 @@ export class AudioEngine {
         if (samplesSinceLast >= this.lockoutSamples) {
           this.handleDetectedBeat(inputBuffer, i, sampleRate, absoluteSampleIndex);
           this.lastBeatSampleTime = absoluteSampleIndex;
-          break; // Avoid catching ringing reverberation in the remainder of this buffer
+          break;
         }
       }
     }
@@ -381,7 +393,6 @@ export class AudioEngine {
     this.beatCounter++;
     const now = performance.now();
 
-    // Capture ~30ms waveform snippet for escapement oscilloscope visualization
     const snippetSamples = Math.floor(0.03 * sampleRate);
     const snippet = new Float32Array(snippetSamples);
     const startIdx = Math.max(0, peakIndexInBuffer - Math.floor(0.003 * sampleRate));
@@ -393,15 +404,11 @@ export class AudioEngine {
 
     const targetPeriodMs = 3600000 / this.watchConfig.effectiveBph;
 
-    // Calculate beat-to-beat interval (IBI)
     let currentHalfPeriodMs = targetPeriodMs;
     if (this.lastBeatSampleTime > 0) {
       const deltaSamples = sampleTime - this.lastBeatSampleTime;
       currentHalfPeriodMs = (deltaSamples / sampleRate) * 1000;
 
-      // Resync guard: If interval is wildly out of range (> 1.65x or < 0.45x targetPeriodMs),
-      // this was a gap after silence or an anomalous noise spike.
-      // Resynchronize cleanly without generating spurious -400 s/d rate artifacts!
       if (currentHalfPeriodMs > targetPeriodMs * 1.65 || currentHalfPeriodMs < targetPeriodMs * 0.45) {
         this.previousHalfPeriodMs = 0;
         this.lastBeatSampleTime = sampleTime;
@@ -409,7 +416,6 @@ export class AudioEngine {
       }
     }
 
-    // Auto-BPH candidate tracker
     if (currentHalfPeriodMs > 70 && currentHalfPeriodMs < 300) {
       this.recentIntervalsMs.push(currentHalfPeriodMs);
       if (this.recentIntervalsMs.length > 25) {
@@ -420,42 +426,27 @@ export class AudioEngine {
       }
     }
 
-    // CRITICAL FIX FOR BACK-AND-FORTH JUMPING:
-    // A mechanical watch alternates clockwise (tick) and counter-clockwise (tock) swings.
-    // If the balance wheel has any beat error (e.g. 0.3 ms), measuring single half-periods
-    // causes the calculated rate to oscillate by ±150 s/d on alternating beats!
-    // Professional timegraphers measure FULL CYCLES (2 beats = 1 complete oscillation, T_tick + T_tock)
-    // where beat error cancels out identically:
-    // T_cycle = T_tick + T_tock
-    // Rate (s/d) = (2 * T_target - T_cycle) / (2 * T_target) * 86400
-
     let rateErrorSecondsPerDay = 0;
     let beatErrorMs = 0.1;
 
     if (this.previousHalfPeriodMs > 0) {
-      // 1. Beat error is half the difference between tick and tock
       beatErrorMs = Math.abs(currentHalfPeriodMs - this.previousHalfPeriodMs) / 2;
       beatErrorMs = Math.min(9.9, Math.max(0, beatErrorMs));
 
-      // 2. Full oscillation cycle period (cancels beat error completely!)
       const fullCyclePeriodMs = currentHalfPeriodMs + this.previousHalfPeriodMs;
       const targetCyclePeriodMs = targetPeriodMs * 2;
 
       const rawCycleRate = ((targetCyclePeriodMs - fullCyclePeriodMs) / targetCyclePeriodMs) * 86400;
 
-      // Bound extreme glitches/transients
       const boundedRate = Math.max(-400, Math.min(400, rawCycleRate));
 
-      // 3. Integration filtering (rolling trimmed average of paired cycles)
       this.recentCycleRates.push(boundedRate);
       if (this.recentCycleRates.length > this.integrationWindowBeats) {
         this.recentCycleRates.shift();
       }
 
-      // Compute trimmed mean of recent cycles for rock-solid stability
       if (this.recentCycleRates.length >= 3) {
         const sorted = [...this.recentCycleRates].sort((a, b) => a - b);
-        // Trim highest and lowest if 4 or more samples
         const toDrop = sorted.length >= 5 ? 1 : 0;
         const valid = sorted.slice(toDrop, sorted.length - toDrop);
         const sum = valid.reduce((a, b) => a + b, 0);
@@ -464,14 +455,12 @@ export class AudioEngine {
         rateErrorSecondsPerDay = boundedRate;
       }
     } else {
-      // First beat fallback
       rateErrorSecondsPerDay = ((targetPeriodMs - currentHalfPeriodMs) / targetPeriodMs) * 86400;
     }
 
     this.previousHalfPeriodMs = currentHalfPeriodMs;
     this.isTickTurn = !this.isTickTurn;
 
-    // Analyze escapement impulse for Amplitude
     const { deltaTMs, amplitude } = this.analyzeEscapementImpulses(
       snippet,
       sampleRate,
@@ -496,7 +485,6 @@ export class AudioEngine {
       this.onBeat(measurement);
     }
 
-    // Extract and emit acoustic signature for watch identification (throttled every 3 beats for smooth multi-cycle analysis)
     if (this.onAcousticSignature && this.beatCounter % 3 === 0) {
       const freqData = new Uint8Array(this.analyserNode ? this.analyserNode.frequencyBinCount : 64);
       if (this.analyserNode) {

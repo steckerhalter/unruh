@@ -41,7 +41,7 @@ export class AudioEngine {
   // Settings
   private audioSettings: AudioSettings = {
     deviceId: 'default',
-    gainMultiplier: 8, // boost piezo signal
+    gainMultiplier: 3000,
     highPassCutoff: 750, // Hz
     bandPassFreq: 4500, // Hz
     sensitivityThreshold: 0.12,

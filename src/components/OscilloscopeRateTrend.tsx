@@ -10,8 +10,6 @@ import { BeatMeasurement, TimeWindowSec } from '../types/timegrapher';
 import {
   Target,
   RotateCcw,
-  Pause,
-  Play,
 } from 'lucide-react';
 
 export type YScaleMode = 'auto-lock';
@@ -45,7 +43,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   onTimeWindowChange,
   onClearHistory,
   isPaused,
-  onTogglePause,
   isRunning = true,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -586,7 +583,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
           <div className="space-y-1.5">
             {/* Time Span Grid */}
             <div>
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block mb-1">Window:</span>
               <div className="grid grid-cols-4 sm:grid-cols-2 gap-1">
                 {TIME_WINDOW_OPTIONS.map((opt) => (
                   <button
@@ -607,8 +603,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
 
             {/* Filter & State Actions */}
             <div className="pt-1.5 border-t border-[#eee5d5] space-y-1">
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block">Filter & State:</span>
-              
               <button
                 type="button"
                 onClick={() => setIsSmoothed((prev) => !prev)}
@@ -618,33 +612,21 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
                     : 'bg-[#f5f0e4] text-stone-600 hover:bg-[#ede5d5] border border-[#e5decb]'
                 }`}
               >
-                Smooth
+                Smooth graph
               </button>
 
-              <div className="grid grid-cols-2 gap-1 pt-0.5">
-                <button
-                  type="button"
-                  onClick={onTogglePause}
-                  className={`py-1 text-[10px] rounded transition flex items-center justify-center gap-1 ${
-                    isPaused
-                      ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
-                      : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
-                  }`}
-                  title={isPaused ? 'Resume trace' : 'Freeze trace'}
-                >
-                  {isPaused ? <Play className="w-2.5 h-2.5" /> : <Pause className="w-2.5 h-2.5" />}
-                  {isPaused ? 'Play' : 'Pause'}
-                </button>
+              <div className="w-full pt-0.5">
                 <button
                   type="button"
                   onClick={onClearHistory}
-                  className="py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
+                  className="w-full py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
                   title="Clear graph trace"
                 >
                   <RotateCcw className="w-2.5 h-2.5" />
                   Clear
                 </button>
               </div>
+
             </div>
           </div>
 

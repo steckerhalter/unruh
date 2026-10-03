@@ -54,7 +54,7 @@ export default function App() {
   const [fingerprintMatch, setFingerprintMatch] = useState<FingerprintMatch | null>(null);
 
   // Integration / Stabilization window (like physical Witschi/Weishi timegraphers)
-  const [integrationSec, setIntegrationSec] = useState<number>(4);
+  const [integrationSec, setIntegrationSec] = useState<number>(12);
 
   // Settings
   const [watchConfig, setWatchConfig] = useState<WatchConfig>({
@@ -316,9 +316,6 @@ export default function App() {
           <div className="flex items-center gap-1.5">
             <span className="text-base font-bold tracking-tight text-stone-900 font-display">
               ChronoScope
-            </span>
-            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#f5f0e4] text-[#78350f] border border-[#e5decb]">
-              Timegrapher
             </span>
           </div>
         </div>
@@ -691,13 +688,13 @@ export default function App() {
                   </div>
 
                   {/* Stabilization Filter Period (controls docked horizontally to the right) */}
-                  <div className="flex items-center justify-between pt-1.5 border-t border-[#eee5d5] text-[10px] font-mono text-stone-600">
+                  <div className="flex items-center justify-start gap-2 pt-1.5 border-t border-[#eee5d5] text-[10px] font-mono text-stone-600">
                     <span className="flex items-center gap-1">
                       <Filter className="w-3 h-3 text-[#78350f]" />
                       Filter Window:
                     </span>
                     <div className="flex items-center gap-1">
-                      {[2, 4, 8, 12].map((sec) => (
+                      {[2, 12, 30].map((sec) => (
                         <button
                           key={sec}
                           onClick={() => setIntegrationSec(sec)}
@@ -717,7 +714,7 @@ export default function App() {
             </div>
           </div>
         ) : (
-          /* Other Tabs: Classic Tape, Escapement Pulse, 6-Position Log, Watch ID */
+          /* Other Tabs: Escapement Pulse, 6-Position Log, Watch ID */
           <div className="space-y-3">
 
             {activeTab === 'escapement' && (

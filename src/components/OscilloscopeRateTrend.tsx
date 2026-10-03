@@ -397,26 +397,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.beginPath();
         ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
         ctx.fill();
-
-        // Floating current rate callout
-        const calloutRate = latest.rateErrorSecondsPerDay;
-        const sign = calloutRate > 0 ? '+' : '';
-        const calloutText = `${sign}${calloutRate.toFixed(1)} s/d`;
-        ctx.font = '600 11px "JetBrains Mono", monospace';
-        const textWidth = ctx.measureText(calloutText).width;
-
-        const badgeX = Math.min(width - paddingRight - textWidth - 10, lastX + 8);
-        const badgeY = Math.max(paddingTop + 12, Math.min(height - paddingBottom - 12, lastY));
-
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(badgeX - 4, badgeY - 9, textWidth + 8, 17);
-        ctx.strokeStyle = '#b45309';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(badgeX - 4, badgeY - 9, textWidth + 8, 17);
-
-        ctx.fillStyle = calloutRate >= 0 ? '#78350f' : '#991b1b';
-        ctx.textAlign = 'left';
-        ctx.fillText(calloutText, badgeX, badgeY + 3);
       }
 
       // 5. Crosshair Probe on Hover

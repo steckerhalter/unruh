@@ -10,26 +10,21 @@ import { BeatMeasurement, TimeWindowSec } from '../types/timegrapher';
 import {
   Target,
   RotateCcw,
-  Pause,
-  Play,
-  Lock,
-  ChevronDown
 } from 'lucide-react';
 
-export type SmoothingLevel = 'raw' | 'smooth';
-
-export type YScaleMode =
-  | 'auto-lock';
+export type YScaleMode = 'auto-lock';
 
 interface Props {
   measurements: BeatMeasurement[];
-  targetRate: number;
+  targetRate?: number;
   timeWindow: TimeWindowSec;
   onTimeWindowChange: (w: TimeWindowSec) => void;
   onClearHistory: () => void;
   isPaused: boolean;
   onTogglePause: () => void;
   isRunning?: boolean;
+  integrationSec?: number;
+  bph?: number;
 }
 
 const TIME_WINDOW_OPTIONS: { sec: TimeWindowSec; label: string }[] = [
@@ -40,109 +35,154 @@ const TIME_WINDOW_OPTIONS: { sec: TimeWindowSec; label: string }[] = [
 ];
 
 export const OscilloscopeRateTrend: React.FC<Props> = ({
-  measurements,
-  integrationSec,
-  bph,
+  measurements = [],
+  integrationSec = 12,
+  bph = 21600,
   targetRate = 0,
   timeWindow,
   onTimeWindowChange,
   onClearHistory,
   isPaused,
-  onTogglePause,
   isRunning = true,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Default to 'regulator-fast' (-20 to +160 s/d)
-  const [yScaleMode, setYScaleMode] = useState<YScaleMode>('auto-lock');
-  const [smoothingLevel, setSmoothingLevel] = useState<SmoothingLevel>('smooth');
+  const [yScaleMode] = useState<YScaleMode>('auto-lock');
+  // Smooth enabled by default
+  const [isSmoothed, setIsSmoothed] = useState<boolean>(true);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; measurement: BeatMeasurement } | null>(null);
 
-  // Auto-lock bounds: calculated when requested or when signal first arrives, then completely locked!
+  // Auto-lock bounds: recalculates and locks strictly every 5 seconds
   const [autoLockedBounds, setAutoLockedBounds] = useState<{ minY: number; maxY: number }>({
     minY: -20,
     maxY: 160,
   });
 
-  // Track frozen timestamp when mic stops or pauses
   const frozenTimeRef = useRef<number | null>(null);
 
   // 1. Calculate window size in beats
   const windowBeats = Math.max(1, Math.round(integrationSec * (bph / 3600)));
 
-  // 2. Compute smoothed data array
+  // 2. High-performance running-sum smoothed data array
   const displayData = useMemo(() => {
-    return measurements.map((item, index) => {
-      const startIndex = Math.max(0, index - windowBeats + 1);
-      const windowSlice = measurements.slice(startIndex, index + 1);
+    const len = measurements.length;
+    if (len === 0) return [];
 
-      const averageRate =
-            windowSlice.reduce((sum, m) => sum + m.rateErrorSecondsPerDay, 0) / windowSlice.length;
+    const result = new Array<BeatMeasurement>(len);
+    let runningSum = 0;
 
-      return {
-        ...item,
-        rateErrorSecondsPerDay: averageRate,
+    for (let i = 0; i < len; i++) {
+      runningSum += measurements[i].rateErrorSecondsPerDay;
+
+      if (i >= windowBeats) {
+        runningSum -= measurements[i - windowBeats].rateErrorSecondsPerDay;
+      }
+
+      const count = Math.min(i + 1, windowBeats);
+      result[i] = {
+        ...measurements[i],
+        rateErrorSecondsPerDay: runningSum / count,
       };
-    });
+    }
+
+    return result;
   }, [measurements, windowBeats]);
 
-  // Most recent rate measurement (uses smoothed data when enabled)
-  const latest = smoothingLevel !== 'raw' && displayData.length > 0
+  // Keep a fresh reference to displayData for the 5s interval timer
+  const displayDataRef = useRef(displayData);
+  useEffect(() => {
+    displayDataRef.current = displayData;
+  }, [displayData]);
+
+  // Calculate auto bounds
+  const calculateAutoBounds = (data: BeatMeasurement[]) => {
+    if (!data || data.length === 0) {
+      return { minY: targetRate - 20, maxY: targetRate + 20 };
+    }
+
+    let minRate = Infinity;
+    let maxRate = -Infinity;
+
+    for (let i = 0; i < data.length; i++) {
+      const val = data[i].rateErrorSecondsPerDay;
+      if (val < minRate) minRate = val;
+      if (val > maxRate) maxRate = val;
+    }
+
+    const spread = Math.max(4, maxRate - minRate);
+    const padding = spread * 0.2;
+
+    minRate -= padding;
+    maxRate += padding;
+
+    // Ensure zero target line remains visible
+    minRate = Math.min(minRate, targetRate - 1);
+    maxRate = Math.max(maxRate, targetRate + 1);
+
+    return {
+      minY: Math.floor(minRate),
+      maxY: Math.ceil(maxRate),
+    };
+  };
+
+  // Timer: recalculates & updates scale strictly every 5 seconds
+  useEffect(() => {
+    const updateBounds = () => {
+      setAutoLockedBounds(calculateAutoBounds(displayDataRef.current));
+    };
+
+    updateBounds();
+    const intervalId = setInterval(updateBounds, 5000);
+
+    return () => clearInterval(intervalId);
+  }, [targetRate]);
+
+  // Latest rate measurement
+  const latest = isSmoothed && displayData.length > 0
     ? displayData[displayData.length - 1]
     : measurements[measurements.length - 1];
 
-  // Function to calculate smart locked bounds from current signal
-  const computeSmartBounds = (rate: number): { minY: number; maxY: number } => {
-    if (rate >= 15) {
-      const ceiling = Math.max(160, Math.ceil((rate + 50) / 25) * 25);
-      return { minY: -20, maxY: ceiling };
-    } else if (rate <= -15) {
-      const floor = Math.min(-160, Math.floor((rate - 50) / 25) * 25);
-      return { minY: floor, maxY: 20 };
-    } else {
-      return { minY: -25, maxY: 25 };
-    }
-  };
-
-  const handleReframe = () => {
-    if (latest) {
-      setAutoLockedBounds(computeSmartBounds(latest.rateErrorSecondsPerDay));
-    }
-  };
-
   // Statistics over visible window
   const stats = useMemo(() => {
-    if (measurements.length === 0) {
+    const len = measurements.length;
+    if (len === 0) {
       return { avg: 0, min: 0, max: 0, stdDev: 0, count: 0 };
     }
-    const cutoff = performance.now() - timeWindow * 1000;
-    const visible = measurements.filter((m) => m.timestamp >= cutoff);
-    if (visible.length === 0) {
-      const last = measurements[measurements.length - 1];
-      return { avg: last.rateErrorSecondsPerDay, min: last.rateErrorSecondsPerDay, max: last.rateErrorSecondsPerDay, stdDev: 0, count: 1 };
-    }
 
+    const cutoff = performance.now() - timeWindow * 1000;
     let sum = 0;
     let min = Infinity;
     let max = -Infinity;
-    for (const m of visible) {
+    let count = 0;
+
+    for (let i = len - 1; i >= 0; i--) {
+      const m = measurements[i];
+      if (m.timestamp < cutoff) break;
+
       const v = m.rateErrorSecondsPerDay;
       sum += v;
       if (v < min) min = v;
       if (v > max) max = v;
+      count++;
     }
-    const avg = sum / visible.length;
-    let sumSqDiff = 0;
-    for (const m of visible) {
-      sumSqDiff += Math.pow(m.rateErrorSecondsPerDay - avg, 2);
-    }
-    const stdDev = Math.sqrt(sumSqDiff / visible.length);
 
-    return { avg, min, max, stdDev, count: visible.length };
+    if (count === 0) {
+      const last = measurements[len - 1];
+      return { avg: last.rateErrorSecondsPerDay, min: last.rateErrorSecondsPerDay, max: last.rateErrorSecondsPerDay, stdDev: 0, count: 1 };
+    }
+
+    const avg = sum / count;
+    let sumSqDiff = 0;
+
+    for (let i = len - count; i < len; i++) {
+      sumSqDiff += Math.pow(measurements[i].rateErrorSecondsPerDay - avg, 2);
+    }
+
+    return { avg, min, max, stdDev: Math.sqrt(sumSqDiff / count), count };
   }, [measurements, timeWindow]);
 
-  // Canvas drawing loop (Yellow/Brown/Khaki Palette on Cream)
+  // Canvas drawing loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -157,6 +197,8 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
       const width = rect.width;
       const height = rect.height;
 
+      if (width === 0 || height === 0) return;
+
       if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
         canvas.width = width * dpr;
         canvas.height = height * dpr;
@@ -169,11 +211,9 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
       ctx.fillStyle = '#faf7f0';
       ctx.fillRect(0, 0, width, height);
 
-      // Determine Y scale bounds
-      let minY = autoLockedBounds.minY;
-      let maxY = autoLockedBounds.maxY;
+      const minY = autoLockedBounds.minY;
+      const maxY = autoLockedBounds.maxY;
 
-      // Coordinate transformers
       const paddingLeft = 56;
       const paddingRight = 12;
       const paddingTop = 16;
@@ -187,7 +227,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         return paddingTop + plotHeight * (1 - normalized);
       };
 
-      // Reference time
       let now: number;
       if (!isRunning || isPaused) {
         if (frozenTimeRef.current === null) {
@@ -206,7 +245,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         return paddingLeft + ratio * plotWidth;
       };
 
-      // 1. Oscilloscope Grid (Subtle warm khaki lines)
+      // 1. Grid
       ctx.lineWidth = 1;
       ctx.strokeStyle = 'rgba(180, 160, 135, 0.45)';
       const gridCols = 8;
@@ -217,7 +256,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.lineTo(x, height - paddingBottom);
         ctx.stroke();
 
-        // Time ticks
         if (c > 0 && c < gridCols) {
           const timeOffsetSec = Math.round(((gridCols - c) / gridCols) * timeWindow);
           ctx.fillStyle = '#8c7e6b';
@@ -227,7 +265,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         }
       }
 
-      // Horizontal rate grid lines
       let step = 10;
       if (yRange > 250) step = 50;
       else if (yRange > 120) step = 25;
@@ -248,7 +285,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Y-axis label
         ctx.fillStyle = r === 0 ? '#78350f' : '#6b5c49';
         ctx.font = r === 0 ? '700 10px "JetBrains Mono", monospace' : '10px "JetBrains Mono", monospace';
         ctx.textAlign = 'right';
@@ -256,10 +292,9 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.fillText(`${sign}${r.toFixed(0)} s/d`, paddingLeft - 5, y + 3.5);
       }
 
-      // 2. TARGET ZERO LINE (0 s/d Reference) - Rich Walnut Chestnut Brown
+      // 2. Target zero line
       const targetY = rateToY(targetRate);
       if (targetY >= paddingTop && targetY <= height - paddingBottom) {
-        // Warm brown glow aura
         ctx.strokeStyle = 'rgba(120, 53, 15, 0.16)';
         ctx.lineWidth = 6;
         ctx.beginPath();
@@ -267,7 +302,6 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.lineTo(width - paddingRight, targetY);
         ctx.stroke();
 
-        // Crisp Deep Chestnut Brown Target Line
         ctx.strokeStyle = '#78350f';
         ctx.lineWidth = 1.75;
         ctx.setLineDash([6, 4]);
@@ -276,23 +310,17 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.lineTo(width - paddingRight, targetY);
         ctx.stroke();
         ctx.setLineDash([]);
-
-        // Target Badge Label on right edge in Brown/Gold
-        ctx.fillStyle = '#78350f';
-        ctx.fillRect(width - paddingRight - 84, targetY - 9, 82, 18);
-        ctx.strokeStyle = '#5c2b0c';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(width - paddingRight - 84, targetY - 9, 82, 18);
-        ctx.fillStyle = '#fef8e7';
-        ctx.font = '700 9px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(`TARGET: 0 s/d`, width - paddingRight - 43, targetY + 3.5);
       }
 
-      // 3. Render Rate Trend Phosphor Oscilloscope Line (Golden Ochre / Amber Brass)
-      const dataToDraw = smoothingLevel !== 'raw' ? displayData : measurements;
+      // 3. Trace line
+      const dataToDraw = isSmoothed ? displayData : measurements;
       const cutoffTime = now - windowMs;
-      const visibleData = dataToDraw.filter((m) => m.timestamp >= cutoffTime);
+
+      let startIdx = 0;
+      while (startIdx < dataToDraw.length && dataToDraw[startIdx].timestamp < cutoffTime) {
+        startIdx++;
+      }
+      const visibleData = dataToDraw.slice(startIdx);
 
       if (visibleData.length > 1) {
         const points = visibleData.map((pt) => ({
@@ -301,14 +329,14 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
           isTick: pt.isTick,
         }));
 
-        // Warm golden glow underlay
         ctx.lineWidth = 4;
         ctx.strokeStyle = 'rgba(194, 120, 3, 0.22)';
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
-        if (smoothingLevel !== 'raw' && points.length > 2) {
+
+        if (isSmoothed && points.length > 2) {
           for (let i = 0; i < points.length - 1; i++) {
             const xc = (points[i].x + points[i + 1].x) / 2;
             const yc = (points[i].y + points[i + 1].y) / 2;
@@ -322,12 +350,12 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         }
         ctx.stroke();
 
-        // Main laser trace line (Warm golden amber #c27803)
         ctx.lineWidth = 2.25;
         ctx.strokeStyle = '#b45309';
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
-        if (smoothingLevel !== 'raw' && points.length > 2) {
+
+        if (isSmoothed && points.length > 2) {
           for (let i = 0; i < points.length - 1; i++) {
             const xc = (points[i].x + points[i + 1].x) / 2;
             const yc = (points[i].y + points[i + 1].y) / 2;
@@ -341,21 +369,19 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         }
         ctx.stroke();
 
-        // Individual measurement dots: Golden Ochre (tick) & Deep Chestnut (tock)
-        for (const pt of points) {
-          ctx.fillStyle = pt.isTick ? '#d97706' : '#78350f';
+        for (let i = 0; i < points.length; i++) {
+          ctx.fillStyle = points[i].isTick ? '#d97706' : '#78350f';
           ctx.beginPath();
-          ctx.arc(pt.x, pt.y, 2.5, 0, Math.PI * 2);
+          ctx.arc(points[i].x, points[i].y, 2.5, 0, Math.PI * 2);
           ctx.fill();
         }
       }
 
-      // 4. Live Tracking Indicator (Rightmost point)
+      // 4. Cursor point
       if (latest && visibleData.length > 0) {
         const lastX = timeToX(latest.timestamp);
         const lastY = rateToY(latest.rateErrorSecondsPerDay);
 
-        // Blinking cursor ring
         const pulse = 4 + Math.sin(now * 0.008) * 2;
         ctx.strokeStyle = 'rgba(180, 83, 9, 0.6)';
         ctx.lineWidth = 1.5;
@@ -369,7 +395,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.fill();
       }
 
-      // 5. Crosshair Probe on Hover
+      // 5. Probe Tooltip
       if (hoverPoint) {
         ctx.strokeStyle = 'rgba(180, 83, 9, 0.7)';
         ctx.lineWidth = 1;
@@ -392,7 +418,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.fill();
       }
 
-      // 6. Standby Overlay when mic is inactive
+      // 6. Standby Overlay
       if (!isRunning && measurements.length === 0) {
         ctx.fillStyle = 'rgba(250, 247, 240, 0.94)';
         ctx.fillRect(paddingLeft + 10, paddingTop + plotHeight / 2 - 32, plotWidth - 20, 64);
@@ -425,7 +451,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   }, [
     measurements,
     displayData,
-    smoothingLevel,
+    isSmoothed,
     timeWindow,
     yScaleMode,
     targetRate,
@@ -459,11 +485,11 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
 
     let closest = measurements[0];
     let minDiff = Math.abs(closest.timestamp - hoverTime);
-    for (const m of measurements) {
-      const diff = Math.abs(m.timestamp - hoverTime);
+    for (let i = 0; i < measurements.length; i++) {
+      const diff = Math.abs(measurements[i].timestamp - hoverTime);
       if (diff < minDiff) {
         minDiff = diff;
-        closest = m;
+        closest = measurements[i];
       }
     }
 
@@ -480,7 +506,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col bg-white border border-[#ded5c5] rounded-xl overflow-hidden shadow-xs">
-      {/* 1-Line Slim Top Header (Zero wasted vertical space) */}
+      {/* 1-Line Slim Header */}
       <div className="flex items-center justify-between px-3 py-1 bg-[#fdfcf9] border-b border-[#ded5c5] text-[11px] font-mono">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-stone-900 flex items-center gap-1.5 font-display text-xs">
@@ -504,18 +530,11 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
             </>
           )}
         </div>
-
-        {/* Guidance tip on Regulator Mode */}
-        {yScaleMode === 'regulator-fast' && (
-          <span className="hidden sm:inline text-[10px] text-[#78350f] bg-[#fef8e7] px-2 py-0.5 rounded border border-[#fde68a]">
-            Adjust index arm to pull trace down to 0 s/d line
-          </span>
-        )}
       </div>
 
-      {/* Main Body: Canvas on Left, Controls Docked to the Right (No wasted vertical space!) */}
+      {/* Main Body */}
       <div className="flex flex-col sm:flex-row items-stretch">
-        {/* Canvas Viewport - Condensed height */}
+        {/* Canvas Viewport */}
         <div ref={containerRef} className="relative flex-1 h-[280px] sm:h-[305px] lg:h-[320px] bg-[#faf7f0]">
           <canvas
             ref={canvasRef}
@@ -549,16 +568,16 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
           )}
         </div>
 
-        {/* Right-Docked Vertical Controls Strip (Takes zero vertical space from the graph!) */}
+        {/* Right-Docked Vertical Controls Strip */}
         <div className="w-full sm:w-36 lg:w-40 bg-[#fdfcf9] border-t sm:border-t-0 sm:border-l border-[#ded5c5] p-2 flex flex-col justify-between text-[11px] font-mono space-y-2">
           <div className="space-y-1.5">
             {/* Time Span Grid */}
             <div>
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block mb-1">Window:</span>
               <div className="grid grid-cols-4 sm:grid-cols-2 gap-1">
                 {TIME_WINDOW_OPTIONS.map((opt) => (
                   <button
                     key={opt.sec}
+                    type="button"
                     onClick={() => onTimeWindowChange(opt.sec)}
                     className={`py-1 px-1.5 text-[10px] rounded transition text-center ${
                       timeWindow === opt.sec
@@ -572,46 +591,36 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Spline & Action Toggles */}
+            {/* Filter & State Actions */}
             <div className="pt-1.5 border-t border-[#eee5d5] space-y-1">
-              <span className="text-[10px] text-stone-500 uppercase tracking-wider block">Filter & State:</span>
               <button
-                onClick={() => {
-                  setSmoothingLevel((prev) =>
-                    prev === 'smooth' ? 'raw' : 'smooth'
-                    );
-                  }}
-                className="w-full py-1 px-1.5 text-[10px] bg-[#f5f0e4] hover:bg-[#ede5d5] border border-[#e5decb] text-stone-700 rounded transition text-center"
-                >
-                  {smoothingLevel === 'smooth' ? 'Spline: Smooth' : 'Spline: Raw'}
+                type="button"
+                onClick={() => setIsSmoothed((prev) => !prev)}
+                className={`w-full py-1 px-1.5 text-[10px] rounded transition text-center font-bold ${
+                  isSmoothed
+                    ? 'bg-[#78350f] text-white shadow-xs'
+                    : 'bg-[#f5f0e4] text-stone-600 hover:bg-[#ede5d5] border border-[#e5decb]'
+                }`}
+              >
+                Smooth graph
               </button>
 
-              <div className="grid grid-cols-2 gap-1 pt-0.5">
+              <div className="w-full pt-0.5">
                 <button
-                  onClick={onTogglePause}
-                  className={`py-1 text-[10px] rounded transition flex items-center justify-center gap-1 ${
-                    isPaused
-                      ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
-                      : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
-                  }`}
-                  title={isPaused ? 'Resume trace' : 'Freeze trace'}
-                >
-                  {isPaused ? <Play className="w-2.5 h-2.5" /> : <Pause className="w-2.5 h-2.5" />}
-                  {isPaused ? 'Play' : 'Pause'}
-                </button>
-                <button
+                  type="button"
                   onClick={onClearHistory}
-                  className="py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
+                  className="w-full py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
                   title="Clear graph trace"
                 >
                   <RotateCcw className="w-2.5 h-2.5" />
                   Clear
                 </button>
               </div>
-                    </div>
+
+            </div>
           </div>
 
-          {/* Compact Vertical Live Telemetry Stats */}
+          {/* Live Telemetry Stats */}
           <div className="pt-1.5 border-t border-[#ded5c5] text-[10px] space-y-0.5 text-stone-600">
             <div className="flex justify-between">
               <span className="text-stone-400">Avg:</span>

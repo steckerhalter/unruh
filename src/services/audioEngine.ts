@@ -20,6 +20,7 @@ import {
 import { globalWatchFingerprinter } from './watchFingerprintEngine';
 
 export class AudioEngine {
+  private streamStartTime: number = 0;
   private audioCtx: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
@@ -144,6 +145,7 @@ export class AudioEngine {
       // 2. EXPLICITLY INITIALIZE NODES WITH THE SINGLE SOURCE OF TRUTH
       // -----------------------------------------------------------------------
       const now = this.audioCtx.currentTime;
+      this.streamStartTime = now;
 
       // Gain Node
       this.gainNode = this.audioCtx.createGain();
@@ -390,6 +392,16 @@ export class AudioEngine {
     sampleRate: number,
     sampleTime: number
   ) {
+
+    // TODO: fix! this messes up the canvas
+    // Ignore initial transient impulse / AGC settling spikes (2 second warmup)
+    // if (!this.isSimulating && this.audioCtx) {
+    //   const elapsedSeconds = this.audioCtx.currentTime - this.streamStartTime;
+    //   if (elapsedSeconds < 2.0) {
+    //     return;
+    //   }
+    // }
+
     this.beatCounter++;
     const now = performance.now();
 

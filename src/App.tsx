@@ -18,10 +18,12 @@ import {
   WatchConfig,
   SimulatorConfig,
   ViewTab,
+} from './types/timegrapher';
+import {
   DEFAULT_WATCH_CONFIG,
   DEFAULT_AUDIO_SETTINGS,
   DEFAULT_SIMULATOR_CONFIG,
-} from './types/timegrapher';
+} from './config/defaults.ts'
 import { AudioEngine } from './services/audioEngine';
 import { globalWatchFingerprinter } from './services/watchFingerprintEngine';
 import { OscilloscopeRateTrend } from './components/OscilloscopeRateTrend';

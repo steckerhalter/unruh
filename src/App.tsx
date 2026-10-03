@@ -52,6 +52,7 @@ export default function App() {
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<ViewTab>('oscilloscope');
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isInitializing, setIsInitializing] = useState(false);
 
   // Acoustic Watch Identification
   const [fingerprintMatch, setFingerprintMatch] = useState<FingerprintMatch | null>(null);
@@ -151,6 +152,7 @@ export default function App() {
     }
   }, [watchConfig]);
 
+
   // Toggle Live Microphone input
   const handleToggleMicrophone = async () => {
     if (!engineRef.current) return;
@@ -158,15 +160,21 @@ export default function App() {
     if (!isSimulating && isRunning) {
       engineRef.current.stop();
       setIsRunning(false);
+      setIsInitializing(false); // Reset initialization state
     } else {
       if (isSimulating) {
         engineRef.current.stop();
         setIsSimulating(false);
       }
+      setIsInitializing(true);
       const success = await engineRef.current.startMicrophone(audioSettings.deviceId);
       if (success) {
         setIsRunning(true);
+        setTimeout(() => {
+          setIsInitializing(false);
+        }, audioSettings.warmUpDelay*1000);
       } else {
+        setIsInitializing(false);
         alert('Could not access audio input. Please grant microphone permissions in your browser or Android settings.');
       }
     }
@@ -240,7 +248,11 @@ export default function App() {
     if (engineRef.current) {
       engineRef.current.updateAudioSettings(newSettings);
       if (!isSimulating && isRunning) {
+        setIsInitializing(true);
         engineRef.current.startMicrophone(newSettings.deviceId);
+        setTimeout(() => {
+          setIsInitializing(false);
+        }, newSettings.warmUpDelay);
       }
     }
   };
@@ -436,6 +448,7 @@ export default function App() {
                 onClearHistory={handleClearHistory}
                 isPaused={isPaused}
                 isRunning={isRunning}
+                isInitializing={isInitializing}
               />
 
               {/* Movement Simulator Panel (condensed in height, controls docked right) */}

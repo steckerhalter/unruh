@@ -488,7 +488,7 @@ export class AudioEngine {
     const isWarmingUp =
           !this.isSimulating &&
             this.audioCtx &&
-            this.audioCtx.currentTime - this.streamStartTime < 3.0;
+            this.audioCtx.currentTime - this.streamStartTime < this.audioSettings.warmUpDelay;
 
     if (!isWarmingUp && this.onBeat) {
       this.onBeat(measurement);

@@ -24,6 +24,7 @@ interface Props {
   isRunning?: boolean;
   integrationSec?: number;
   bph?: number;
+  isInitializing?: number;
 }
 
 const TIME_WINDOW_OPTIONS: { sec: TimeWindowSec; label: string }[] = [
@@ -43,6 +44,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   onClearHistory,
   isPaused,
   isRunning = true,
+  isInitializing,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -418,7 +420,26 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
       }
 
       // 6. Standby Overlay
-      if (!isRunning && measurements.length === 0) {
+      if (isInitializing) {
+        // Overlay box for Audio Initialization state
+        ctx.fillStyle = 'rgba(250, 247, 240, 0.94)';
+        ctx.fillRect(paddingLeft + 10, paddingTop + plotHeight / 2 - 32, plotWidth - 20, 64);
+        ctx.strokeStyle = '#b45309';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(paddingLeft + 10, paddingTop + plotHeight / 2 - 32, plotWidth - 20, 64);
+
+        // Heading
+        ctx.fillStyle = '#b45309';
+        ctx.font = '700 12px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('Initializing Audio Input...', width / 2, paddingTop + plotHeight / 2 - 8);
+
+        // Subtitle
+        ctx.fillStyle = '#78716c';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('... and keep you!', width / 2, paddingTop + plotHeight / 2 + 14);
+      } else if (!isRunning && measurements.length === 0) {
+        // Overlay box for Standby state
         ctx.fillStyle = 'rgba(250, 247, 240, 0.94)';
         ctx.fillRect(paddingLeft + 10, paddingTop + plotHeight / 2 - 32, plotWidth - 20, 64);
         ctx.strokeStyle = '#ded5c5';
@@ -428,16 +449,17 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         ctx.fillStyle = '#78350f';
         ctx.font = '700 12px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('STANDBY — CLICK "LIVE MIC" OR "SIMULATE" TO GRAPH', width / 2, paddingTop + plotHeight / 2 - 8);
+        ctx.fillText('STANDBY — click "Livne Mic" or "Simulate" to graph', width / 2, paddingTop + plotHeight / 2 - 8);
 
         ctx.fillStyle = '#78716c';
         ctx.font = '11px sans-serif';
-        ctx.fillText('Please wait 3 seconds for audio to initialize after enabling the mic.', width / 2, paddingTop + plotHeight / 2 + 14);
+        ctx.fillText('May God bless you ...', width / 2, paddingTop + plotHeight / 2 + 14);
       }
 
       ctx.restore();
 
-      if (isRunning && !isPaused) {
+      // Ensure animation keeps looping while initializing or active
+      if ((isRunning || isInitializing) && !isPaused) {
         animationId = requestAnimationFrame(render);
       }
     };

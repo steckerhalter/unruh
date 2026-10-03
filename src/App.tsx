@@ -276,12 +276,11 @@ export default function App() {
     return measurements.slice(-count);
   }, [measurements, integrationSec, watchConfig.effectiveBph]);
 
-  // Rock-solid median rate (eliminates all jitter & jumping back and forth)
+  // Compute smoothed rolling average for telemetry based on integrationSec
   const liveRateAvg = useMemo(() => {
     if (recentBeats.length === 0) return latestBeat ? latestBeat.rateErrorSecondsPerDay : 0;
-    const sorted = [...recentBeats].map((b) => b.rateErrorSecondsPerDay).sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted[mid];
+    const sum = recentBeats.reduce((acc, b) => acc + b.rateErrorSecondsPerDay, 0);
+    return sum / recentBeats.length; // 👈 True moving average
   }, [recentBeats, latestBeat]);
 
   const liveAmpAvg = useMemo(() => {
@@ -447,6 +446,8 @@ export default function App() {
               {/* Primary Oscilloscope Rate Trend Timeline with right-docked controls */}
               <OscilloscopeRateTrend
                 measurements={measurements}
+                integrationSec={integrationSec}
+                bph={watchConfig.effectiveBph}
                 targetRate={watchConfig.targetRate}
                 timeWindow={timeWindow}
                 onTimeWindowChange={setTimeWindow}

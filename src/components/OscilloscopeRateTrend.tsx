@@ -16,7 +16,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 
-export type SmoothingLevel = 'raw' | 'curve-5' | 'curve-9';
+export type SmoothingLevel = 'raw' | 'smooth';
 
 export type YScaleMode =
   | 'regulator-fast'      // -20 to +160 s/d: Target near bottom, max resolution for fast watches
@@ -48,6 +48,8 @@ const TIME_WINDOW_OPTIONS: { sec: TimeWindowSec; label: string }[] = [
 
 export const OscilloscopeRateTrend: React.FC<Props> = ({
   measurements,
+  integrationSec,
+  bph,
   targetRate = 0,
   timeWindow,
   onTimeWindowChange,
@@ -61,7 +63,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
 
   // Default to 'regulator-fast' (-20 to +160 s/d)
   const [yScaleMode, setYScaleMode] = useState<YScaleMode>('regulator-fast');
-  const [smoothingLevel, setSmoothingLevel] = useState<SmoothingLevel>('curve-5');
+  const [smoothingLevel, setSmoothingLevel] = useState<SmoothingLevel>('smooth');
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; measurement: BeatMeasurement } | null>(null);
 
   // Auto-lock bounds: calculated when requested or when signal first arrives, then completely locked!
@@ -73,30 +75,28 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   // Track frozen timestamp when mic stops or pauses
   const frozenTimeRef = useRef<number | null>(null);
 
-  // Moving average smoothing helper
-  const smoothedData = useMemo(() => {
-    if (smoothingLevel === 'raw' || measurements.length === 0) return measurements;
-    const windowSize = smoothingLevel === 'curve-9' ? 9 : 5;
-    const result: BeatMeasurement[] = [];
-    for (let i = 0; i < measurements.length; i++) {
-      let sum = 0;
-      let count = 0;
-      const start = Math.max(0, i - windowSize + 1);
-      for (let j = start; j <= i; j++) {
-        sum += measurements[j].rateErrorSecondsPerDay;
-        count++;
-      }
-      result.push({
-        ...measurements[i],
-        rateErrorSecondsPerDay: sum / count,
-      });
-    }
-    return result;
-  }, [measurements, smoothingLevel]);
+  // 1. Calculate window size in beats
+  const windowBeats = Math.max(1, Math.round(integrationSec * (bph / 3600)));
+
+  // 2. Compute smoothed data array
+  const displayData = useMemo(() => {
+    return measurements.map((item, index) => {
+      const startIndex = Math.max(0, index - windowBeats + 1);
+      const windowSlice = measurements.slice(startIndex, index + 1);
+
+      const averageRate =
+            windowSlice.reduce((sum, m) => sum + m.rateErrorSecondsPerDay, 0) / windowSlice.length;
+
+      return {
+        ...item,
+        rateErrorSecondsPerDay: averageRate,
+      };
+    });
+  }, [measurements, windowBeats]);
 
   // Most recent rate measurement (uses smoothed data when enabled)
-  const latest = smoothingLevel !== 'raw' && smoothedData.length > 0
-    ? smoothedData[smoothedData.length - 1]
+  const latest = smoothingLevel !== 'raw' && displayData.length > 0
+    ? displayData[displayData.length - 1]
     : measurements[measurements.length - 1];
 
   // Function to calculate smart locked bounds from current signal
@@ -320,7 +320,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
       }
 
       // 3. Render Rate Trend Phosphor Oscilloscope Line (Golden Ochre / Amber Brass)
-      const dataToDraw = smoothingLevel !== 'raw' ? smoothedData : measurements;
+      const dataToDraw = smoothingLevel !== 'raw' ? displayData : measurements;
       const cutoffTime = now - windowMs;
       const visibleData = dataToDraw.filter((m) => m.timestamp >= cutoffTime);
 
@@ -454,7 +454,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
     };
   }, [
     measurements,
-    smoothedData,
+    displayData,
     smoothingLevel,
     timeWindow,
     yScaleMode,
@@ -669,37 +669,37 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
               <button
                 onClick={() => {
                   setSmoothingLevel((prev) =>
-                    prev === 'curve-5' ? 'curve-9' : prev === 'curve-9' ? 'raw' : 'curve-5'
-                  );
-                }}
+                    prev === 'smooth' ? 'raw' : 'smooth'
+                    );
+                  }}
                 className="w-full py-1 px-1.5 text-[10px] bg-[#f5f0e4] hover:bg-[#ede5d5] border border-[#e5decb] text-stone-700 rounded transition text-center"
-              >
-                {smoothingLevel === 'curve-5' ? 'Spline: Smooth' : smoothingLevel === 'curve-9' ? 'Spline: Ultra' : 'Spline: Raw'}
+                >
+                  {smoothingLevel === 'smooth' ? 'Spline: Smooth' : 'Spline: Raw'}
               </button>
 
-              <div className="grid grid-cols-2 gap-1 pt-0.5">
-                <button
-                  onClick={onTogglePause}
-                  className={`py-1 text-[10px] rounded transition flex items-center justify-center gap-1 ${
-                    isPaused
-                      ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
-                      : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
-                  }`}
-                  title={isPaused ? 'Resume trace' : 'Freeze trace'}
-                >
-                  {isPaused ? <Play className="w-2.5 h-2.5" /> : <Pause className="w-2.5 h-2.5" />}
-                  {isPaused ? 'Play' : 'Pause'}
-                </button>
-                <button
-                  onClick={onClearHistory}
-                  className="py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
-                  title="Clear graph trace"
-                >
-                  <RotateCcw className="w-2.5 h-2.5" />
-                  Clear
-                </button>
-              </div>
-            </div>
+                  <div className="grid grid-cols-2 gap-1 pt-0.5">
+                    <button
+                      onClick={onTogglePause}
+                      className={`py-1 text-[10px] rounded transition flex items-center justify-center gap-1 ${
+                        isPaused
+                          ? 'bg-[#fef3c7] text-[#78350f] font-bold border border-[#fde68a]'
+                          : 'bg-[#f5f0e4] text-stone-700 hover:bg-[#ede5d5] border border-[#e5decb]'
+                      }`}
+                      title={isPaused ? 'Resume trace' : 'Freeze trace'}
+                    >
+                      {isPaused ? <Play className="w-2.5 h-2.5" /> : <Pause className="w-2.5 h-2.5" />}
+                      {isPaused ? 'Play' : 'Pause'}
+                    </button>
+                    <button
+                      onClick={onClearHistory}
+                      className="py-1 text-[10px] bg-[#f5f0e4] hover:bg-rose-50 text-stone-700 hover:text-rose-700 border border-[#e5decb] hover:border-rose-200 rounded transition flex items-center justify-center gap-1"
+                      title="Clear graph trace"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                      Clear
+                    </button>
+                  </div>
+                    </div>
           </div>
 
           {/* Compact Vertical Live Telemetry Stats */}

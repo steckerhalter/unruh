@@ -393,15 +393,6 @@ export class AudioEngine {
     sampleTime: number
   ) {
 
-    // TODO: fix! this messes up the canvas
-    // Ignore initial transient impulse / AGC settling spikes (2 second warmup)
-    // if (!this.isSimulating && this.audioCtx) {
-    //   const elapsedSeconds = this.audioCtx.currentTime - this.streamStartTime;
-    //   if (elapsedSeconds < 2.0) {
-    //     return;
-    //   }
-    // }
-
     this.beatCounter++;
     const now = performance.now();
 
@@ -493,12 +484,20 @@ export class AudioEngine {
       waveformSnippet: snippet,
     };
 
-    if (this.onBeat) {
+    // --- WARMUP GUARD FOR CANVAS / UI EMISSIONS ---
+    const isWarmingUp =
+          !this.isSimulating &&
+            this.audioCtx &&
+            this.audioCtx.currentTime - this.streamStartTime < 3.0;
+
+    if (!isWarmingUp && this.onBeat) {
       this.onBeat(measurement);
     }
 
-    if (this.onAcousticSignature && this.beatCounter % 3 === 0) {
-      const freqData = new Uint8Array(this.analyserNode ? this.analyserNode.frequencyBinCount : 64);
+    if (!isWarmingUp && this.onAcousticSignature && this.beatCounter % 3 === 0) {
+      const freqData = new Uint8Array(
+        this.analyserNode ? this.analyserNode.frequencyBinCount : 64
+      );
       if (this.analyserNode) {
         this.analyserNode.getByteFrequencyData(freqData);
       }

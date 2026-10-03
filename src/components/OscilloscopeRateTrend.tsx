@@ -432,7 +432,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
 
         ctx.fillStyle = '#78716c';
         ctx.font = '11px sans-serif';
-        ctx.fillText('Trace will lock firmly onto target without unwanted viewport jitter.', width / 2, paddingTop + plotHeight / 2 + 14);
+        ctx.fillText('Please wait 3 seconds for audio to initialize after enabling the mic.', width / 2, paddingTop + plotHeight / 2 + 14);
       }
 
       ctx.restore();

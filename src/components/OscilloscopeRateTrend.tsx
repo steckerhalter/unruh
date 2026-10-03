@@ -601,7 +601,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
                     : 'bg-[#f5f0e4] text-stone-600 hover:bg-[#ede5d5] border border-[#e5decb]'
                 }`}
               >
-                Smooth graph
+                Line smoothing
               </button>
 
               <div className="w-full pt-0.5">

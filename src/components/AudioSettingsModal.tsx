@@ -145,12 +145,13 @@ export const AudioSettingsModal: React.FC<Props> = ({
           <div className="space-y-1">
             <div className="flex justify-between text-xs font-mono">
               <span className="text-stone-700 font-semibold">Piezo Pre-Amp Boost:</span>
+              <span className="text-[#92400e] font-bold">{localSettings.gainMultiplier}</span>
             </div>
             <input
               type="range"
               min="1"
               max="5000"
-              step="100"
+              step="1"
               value={localSettings.gainMultiplier}
               onChange={(e) =>
                 setLocalSettings({ ...localSettings, gainMultiplier: parseInt(e.target.value, 10) })
@@ -256,18 +257,7 @@ export const AudioSettingsModal: React.FC<Props> = ({
         {/* Modal Footer */}
         <div className="flex items-center justify-between px-5 py-3 bg-[#faf7f0] border-t border-[#ded5c5]">
           <button
-            onClick={() =>
-              setLocalSettings({
-                deviceId: 'default',
-                gainMultiplier: 3000,
-                highPassCutoff: 1000,
-                bandPassFreq: 4500,
-                sensitivityThreshold: 0.12,
-                autoThreshold: true,
-                lockoutRatio: 0.65,
-                noiseGate: 0.02,
-              })
-            }
+            onClick={() => setLocalSettings({ ...settings })}
             className="text-xs font-mono text-stone-600 hover:text-stone-900"
           >
             Reset Defaults

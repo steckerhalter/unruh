@@ -194,7 +194,7 @@ export class AudioEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // 3. ADD A RESET METHOD TO RESTORE CENTRAL DEFAULTS AT ANY TIME
+  // 3. RESET METHOD TO RESTORE CENTRAL DEFAULTS
   // ---------------------------------------------------------------------------
   public resetToDefaults() {
     this.audioSettings = { ...DEFAULT_AUDIO_SETTINGS };
@@ -392,13 +392,13 @@ export class AudioEngine {
     sampleRate: number,
     sampleTime: number
   ) {
-
     this.beatCounter++;
     const now = performance.now();
 
-    const snippetSamples = Math.floor(0.03 * sampleRate);
+    // 40ms window, look back 20ms before T3 peak to capture T1 pulse reliably
+    const snippetSamples = Math.floor(0.04 * sampleRate);
     const snippet = new Float32Array(snippetSamples);
-    const startIdx = Math.max(0, peakIndexInBuffer - Math.floor(0.003 * sampleRate));
+    const startIdx = Math.max(0, peakIndexInBuffer - Math.floor(0.02 * sampleRate));
     for (let j = 0; j < snippetSamples; j++) {
       if (startIdx + j < buffer.length) {
         snippet[j] = buffer[startIdx + j];
@@ -530,11 +530,12 @@ export class AudioEngine {
 
     let deltaTMs = 6.8;
     const t3Sample = maxIdx;
-    const minImpulseDistance = Math.floor(0.0035 * sampleRate);
-    const maxImpulseDistance = Math.floor(0.014 * sampleRate);
+    const minImpulseDistance = Math.floor(0.004 * sampleRate); // 4ms
+    const maxImpulseDistance = Math.floor(0.018 * sampleRate); // 18ms
 
     let t1Sample = Math.max(0, t3Sample - minImpulseDistance);
     let earlyPeakVal = 0;
+
     for (let i = Math.max(0, t3Sample - maxImpulseDistance); i < t3Sample - minImpulseDistance; i++) {
       const val = Math.abs(snippet[i]);
       if (val > earlyPeakVal) {
@@ -543,16 +544,20 @@ export class AudioEngine {
       }
     }
 
-    if (earlyPeakVal > 0.15 * maxVal) {
+    if (earlyPeakVal > 0.10 * maxVal) {
       deltaTMs = ((t3Sample - t1Sample) / sampleRate) * 1000;
     }
 
-    const angleRad = (Math.PI * deltaTMs) / targetPeriodMs;
-    const sinVal = Math.sin(angleRad);
-    let amplitude = 275;
-    if (sinVal > 0.05) {
-      amplitude = Math.round(liftAngle / sinVal);
-      amplitude = Math.max(160, Math.min(335, amplitude));
+    const liftAngleRad = (liftAngle * Math.PI) / 180;
+    const omegaT = (Math.PI * deltaTMs) / targetPeriodMs;
+    const sinVal = Math.sin(omegaT);
+
+    let amplitude = 220; // Default sensible fallback
+    if (sinVal > 0.01) {
+      // Standard Horological Amplitude equation: LiftAngle / (2 * sin(pi * deltaT / T))
+      const ampRad = liftAngleRad / (2 * sinVal);
+      amplitude = Math.round((ampRad * 180) / Math.PI);
+      amplitude = Math.max(120, Math.min(360, amplitude));
     }
 
     return { deltaTMs, amplitude };

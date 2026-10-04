@@ -540,8 +540,8 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
                   <span className="font-mono font-bold text-xs text-[#b45309] tracking-wider">
                     Initializing Audio Input
                   </span>
-                  <span className="text-[11px] text-[#78716c]">
-                    May God bless you...
+                  <span className="text-[11px] text-[#888]">
+                    May God bless and keep you!
                   </span>
                 </div>
               </div>

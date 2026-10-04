@@ -18,7 +18,7 @@ export const DEFAULT_AUDIO_SETTINGS: Readonly<AudioSettings> = Object.freeze({
   sensitivityThreshold: 0.12,
   autoThreshold: true,
   lockoutRatio: 0.65,
-  noiseGate: 0.1,
+  noiseGate: 0.02,
   warmUpDelay: 5,
 });
 

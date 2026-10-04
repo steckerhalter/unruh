@@ -16,6 +16,7 @@ interface Props {
     name: string;
     bph: BphOption;
     rate: number;
+    rateError: number;
     beatError: number;
     amplitude: number;
     noise: number;

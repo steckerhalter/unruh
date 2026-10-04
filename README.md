@@ -30,15 +30,16 @@ Webapp: https://steckerhalter.github.io/unruh/
 
 ## 💻 Usage Instructions
 
-1. **Attach Microphone:** Clamp your piezo microphone firmly to the watch case, crown, or movement holder.
-2. **Select Lift Angle:** Set the balance lift angle to match your watch caliber's specification (default is $52^{\circ}$).
-3. **Start Live Mic:** Click **Live Mic** to initialize audio stream capture.
-4. **Adjust Sensitivity:** If necessary, adjust the pre-amp boost until distinct tick/tock peaks are registered without false triggers.
-5. **Observe Trace:** Allow the rate oscilloscope 15–30 seconds to establish a stable rate trend line.
+1. **Open the Webapp**: Goto https://steckerhalter.github.io/unruh/ in your browser.
+2. **Attach Microphone:** Clamp your piezo microphone firmly to the watch case, crown, or movement holder.
+3. **Select Lift Angle:** Set the balance lift angle to match your watch caliber's specification (default is $52^{\circ}$).
+4. **Start Live Mic:** Click **Live Mic** to initialize audio stream capture.
+5. **Adjust Sensitivity:** If necessary, adjust the pre-amp boost until distinct tick/tock peaks are registered without false triggers.
+6. **Observe Trace:** Allow the rate oscilloscope 15–30 seconds to establish a stable rate trend line.
 
 ---
 
-## Development
+## 🧑‍💻 Development
 
 This guide is for local installation and development. If you don't need that, you can use the online version directly in your browser:
 https://steckerhalter.github.io/unruh/

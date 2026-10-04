@@ -6,6 +6,9 @@
 
 # ⏱️ Unruh — Precision Watchmaker Timegrapher
 
+**WARNING: THIS IS UNDER EARLY DEVELEPOMENT AND CONTAINS BUGS**  
+To help with the development either open [issues](https://github.com/steckerhalter/unruh/issues) or see the [##development] section.
+
 Webapp: https://steckerhalter.github.io/unruh/
 
 **Unruh** is an open-source, web-based mechanical watch timing and diagnostic tool. Designed for watchmakers, restorers, and horology enthusiasts, Unruh leverages high-sample-rate web audio processing to measure mechanical movement performance—including daily rate error ($\text{s/d}$), balance amplitude, beat error, and acoustic signature identification—directly from your browser using standard piezo acoustic sensors or high-sensitivity microphones.
@@ -26,7 +29,7 @@ Webapp: https://steckerhalter.github.io/unruh/
 ---
 
 
-## 🚀 Getting Started
+## Development
 
 This guide is for local installation and development. If you don't need that, you can use the online version directly in your browser:
 https://steckerhalter.github.io/unruh/

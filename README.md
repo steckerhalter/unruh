@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://steckerhalter.github.io/unruh/">
+    <img src="branding/unruhlogo.jpg" alt="Unruh Timegrapher Logo" width="200" height="auto">
+  </a>
+</p>
+
 # ⏱️ Unruh — Precision Watchmaker Timegrapher
 
 Webapp: https://steckerhalter.github.io/unruh/

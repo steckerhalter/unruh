@@ -65,6 +65,7 @@ export class AudioEngine {
 
   // Recent intervals for auto-BPH detection
   private recentIntervalsMs: number[] = [];
+  private recentBeatErrorsMs: number[] = [];
 
   constructor(
     initialAudioSettings?: Partial<AudioSettings>,
@@ -433,14 +434,26 @@ export class AudioEngine {
     let beatErrorMs = 0.1;
 
     if (this.previousHalfPeriodMs > 0) {
-      beatErrorMs = Math.abs(currentHalfPeriodMs - this.previousHalfPeriodMs) / 2;
-      beatErrorMs = Math.min(9.9, Math.max(0, beatErrorMs));
+      // Correct Horological Beat Error: |T_tick - T_tock| / 2
+      const rawBeatError = Math.abs(currentHalfPeriodMs - this.previousHalfPeriodMs) / 2;
 
+      // Keep raw beat error within realistic limits (0.0ms - 9.9ms)
+      const boundedBeatError = Math.min(9.9, Math.max(0, rawBeatError));
+
+      // Rolling buffer for smooth UI readings (averages out acoustic jitter)
+      this.recentBeatErrorsMs.push(boundedBeatError);
+      if (this.recentBeatErrorsMs.length > 5) {
+        this.recentBeatErrorsMs.shift();
+      }
+
+      // Median/Average of recent beat errors
+      const sortedErrors = [...this.recentBeatErrorsMs].sort((a, b) => a - b);
+      beatErrorMs = sortedErrors[Math.floor(sortedErrors.length / 2)];
+
+      // Daily rate calculation on paired cycle (T_tick + T_tock)
       const fullCyclePeriodMs = currentHalfPeriodMs + this.previousHalfPeriodMs;
       const targetCyclePeriodMs = targetPeriodMs * 2;
-
       const rawCycleRate = ((targetCyclePeriodMs - fullCyclePeriodMs) / targetCyclePeriodMs) * 86400;
-
       const boundedRate = Math.max(-400, Math.min(400, rawCycleRate));
 
       this.recentCycleRates.push(boundedRate);
@@ -458,7 +471,9 @@ export class AudioEngine {
         rateErrorSecondsPerDay = boundedRate;
       }
     } else {
+      // First beat after a reset or start
       rateErrorSecondsPerDay = ((targetPeriodMs - currentHalfPeriodMs) / targetPeriodMs) * 86400;
+      beatErrorMs = 0.0; // Clean baseline on reset
     }
 
     this.previousHalfPeriodMs = currentHalfPeriodMs;

@@ -7,7 +7,7 @@
 # ⏱️ Unruh — Precision Watchmaker Timegrapher
 
 **WARNING: THIS IS UNDER EARLY DEVELEPOMENT AND CONTAINS BUGS**  
-To help with the development either open [issues](https://github.com/steckerhalter/unruh/issues) or see the [##development] section.
+To help with the development either open [issues](https://github.com/steckerhalter/unruh/issues) or see the [development](##Development) section.
 
 Webapp: https://steckerhalter.github.io/unruh/
 

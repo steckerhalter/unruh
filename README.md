@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://steckerhalter.github.io/unruh/">
-    <img src="branding/unruhlogo.jpg" alt="Unruh Timegrapher Logo" width="200" height="auto">
+    <img src="branding/ulogo.jpg" alt="Unruh Timegrapher Logo" width="auto" height="auto">
   </a>
 </p>
 

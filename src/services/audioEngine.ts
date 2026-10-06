@@ -1,8 +1,7 @@
 /**
  * Unruh Web Audio DSP Engine
- * Tailored specifically for piezo microphones & acoustic watch escapement detection.
- * Computes daily rate deviation on paired oscillation cycles (T_tick + T_tock) to eliminate
- * the beat error jump artifact, with sub-sample peak interpolation and integration filtering.
+ * Fixes waveform trace jumping using a continuous audio ring buffer and 
+ * fixed-offset T1 edge alignment across Web Audio processing chunks.
  */
 
 import {
@@ -43,15 +42,13 @@ export class AudioEngine {
   public onAutoBphDetected?: (detectedBph: BphOption) => void;
   public onAcousticSignature?: (signature: AcousticSignature) => void;
 
-  // ---------------------------------------------------------------------------
-  // 1. USE CENTRAL DEFAULTS AS INITIAL STATE
-  // ---------------------------------------------------------------------------
+  // Initial state derived from central defaults
   private audioSettings: AudioSettings = { ...DEFAULT_AUDIO_SETTINGS };
   private watchConfig: WatchConfig = { ...DEFAULT_WATCH_CONFIG };
 
   // DSP internal state
   private beatCounter: number = 0;
-  private totalProcessedSamples: number = 0; // Monotonic sample accumulator
+  private totalProcessedSamples: number = 0;
   private lastBeatSampleTime: number = 0;
   private previousHalfPeriodMs: number = 0;
   private isTickTurn: boolean = true;
@@ -59,13 +56,22 @@ export class AudioEngine {
   private adaptiveThreshold: number = 0.15;
   private backgroundNoiseLevel: number = 0.02;
 
-  // Rolling rate smoothing buffer (paired cycle rates)
-  private recentCycleRates: number[] = [];
-  private integrationWindowBeats: number = 6; // ~1-2 seconds of beats for stable reading
+  // CONTINUOUS RING BUFFER (200ms window history at 48kHz)
+  private readonly RING_SIZE = 19200;
+  private ringBuffer = new Float32Array(this.RING_SIZE);
+  private ringWriteHead = 0;
 
-  // Recent intervals for auto-BPH detection
+  // Rolling rate smoothing buffer
+  private recentCycleRates: number[] = [];
+  private integrationWindowBeats: number = 6;
   private recentIntervalsMs: number[] = [];
   private recentBeatErrorsMs: number[] = [];
+
+  // Simulation parameters
+  private _simRate = 0;
+  private _simBeatError = 0.2;
+  private _simAmplitude = 280;
+  private _simNoise = 0.05;
 
   constructor(
     initialAudioSettings?: Partial<AudioSettings>,
@@ -87,13 +93,22 @@ export class AudioEngine {
   public updateAudioSettings(newSettings: Partial<AudioSettings>) {
     this.audioSettings = { ...this.audioSettings, ...newSettings };
     if (this.gainNode && newSettings.gainMultiplier !== undefined) {
-      this.gainNode.gain.setValueAtTime(this.audioSettings.gainMultiplier, this.audioCtx?.currentTime || 0);
+      this.gainNode.gain.setValueAtTime(
+        this.audioSettings.gainMultiplier,
+        this.audioCtx?.currentTime || 0
+      );
     }
     if (this.highPassNode && newSettings.highPassCutoff !== undefined) {
-      this.highPassNode.frequency.setValueAtTime(this.audioSettings.highPassCutoff, this.audioCtx?.currentTime || 0);
+      this.highPassNode.frequency.setValueAtTime(
+        this.audioSettings.highPassCutoff,
+        this.audioCtx?.currentTime || 0
+      );
     }
     if (this.bandPassNode && newSettings.bandPassFreq !== undefined) {
-      this.bandPassNode.frequency.setValueAtTime(this.audioSettings.bandPassFreq, this.audioCtx?.currentTime || 0);
+      this.bandPassNode.frequency.setValueAtTime(
+        this.audioSettings.bandPassFreq,
+        this.audioCtx?.currentTime || 0
+      );
     }
     if (this.audioCtx) {
       this.updateLockoutSamples(this.audioCtx.sampleRate);
@@ -109,15 +124,17 @@ export class AudioEngine {
 
   private updateLockoutSamples(sampleRate: number) {
     const targetPeriodMs = 3600000 / this.watchConfig.effectiveBph;
-    const lockoutMs = targetPeriodMs * this.audioSettings.lockoutRatio;
-    this.lockoutSamples = Math.floor((lockoutMs / 1000) * sampleRate);
+    const minLockoutMs = Math.max(125, targetPeriodMs * 0.62);
+    this.lockoutSamples = Math.floor((minLockoutMs / 1000) * sampleRate);
   }
 
   public async startMicrophone(deviceId?: string): Promise<boolean> {
     try {
       this.stop();
 
-      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioContextClass =
+            window.AudioContext ||
+              (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.audioCtx = new AudioContextClass({ latencyHint: 'interactive' });
       if (this.audioCtx.state === 'suspended') {
         await this.audioCtx.resume();
@@ -127,6 +144,8 @@ export class AudioEngine {
       this.updateLockoutSamples(sampleRate);
       this.totalProcessedSamples = 0;
       this.lastBeatSampleTime = 0;
+      this.ringWriteHead = 0;
+      this.ringBuffer.fill(0);
 
       const activeDeviceId = deviceId || this.audioSettings.deviceId;
 
@@ -142,38 +161,29 @@ export class AudioEngine {
       this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       this.sourceNode = this.audioCtx.createMediaStreamSource(this.mediaStream);
 
-      // -----------------------------------------------------------------------
-      // 2. EXPLICITLY INITIALIZE NODES WITH THE SINGLE SOURCE OF TRUTH
-      // -----------------------------------------------------------------------
       const now = this.audioCtx.currentTime;
       this.streamStartTime = now;
 
-      // Gain Node
       this.gainNode = this.audioCtx.createGain();
       this.gainNode.gain.setValueAtTime(this.audioSettings.gainMultiplier, now);
 
-      // High-Pass Node
       this.highPassNode = this.audioCtx.createBiquadFilter();
       this.highPassNode.type = 'highpass';
-      this.highPassNode.frequency.setValueAtTime(this.audioSettings.highPassCutoff, now);
+      this.highPassNode.frequency.setValueAtTime(2200, now);
       this.highPassNode.Q.setValueAtTime(0.707, now);
 
-      // Band-Pass Node
       this.bandPassNode = this.audioCtx.createBiquadFilter();
       this.bandPassNode.type = 'bandpass';
-      this.bandPassNode.frequency.setValueAtTime(this.audioSettings.bandPassFreq, now);
-      this.bandPassNode.Q.setValueAtTime(1.8, now);
+      this.bandPassNode.frequency.setValueAtTime(3600, now);
+      this.bandPassNode.Q.setValueAtTime(2.2, now);
 
-      // Analyser Node
       this.analyserNode = this.audioCtx.createAnalyser();
       this.analyserNode.fftSize = 1024;
       this.analyserNode.smoothingTimeConstant = 0.2;
 
-      // ScriptProcessor Node
       this.processorNode = this.audioCtx.createScriptProcessor(2048, 1, 1);
       this.processorNode.onaudioprocess = (e) => this.processAudioBuffer(e);
 
-      // Connect DSP chain
       this.sourceNode.connect(this.gainNode);
       this.gainNode.connect(this.highPassNode);
       this.highPassNode.connect(this.bandPassNode);
@@ -194,9 +204,6 @@ export class AudioEngine {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // 3. RESET METHOD TO RESTORE CENTRAL DEFAULTS
-  // ---------------------------------------------------------------------------
   public resetToDefaults() {
     this.audioSettings = { ...DEFAULT_AUDIO_SETTINGS };
     this.watchConfig = { ...DEFAULT_WATCH_CONFIG };
@@ -218,7 +225,9 @@ export class AudioEngine {
     this.isSimulating = true;
     this.isRunning = true;
 
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioContextClass =
+          window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.audioCtx = new AudioContextClass();
 
     this.watchConfig.effectiveBph = bph;
@@ -226,6 +235,8 @@ export class AudioEngine {
     this.updateLockoutSamples(sampleRate);
     this.totalProcessedSamples = 0;
     this.lastBeatSampleTime = 0;
+    this.ringWriteHead = 0;
+    this.ringBuffer.fill(0);
 
     this.gainNode = this.audioCtx.createGain();
     this.gainNode.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
@@ -286,10 +297,6 @@ export class AudioEngine {
     this._simAmplitude = amplitudeDeg;
     this._simNoise = noiseLevel;
   }
-  private _simRate = 0;
-  private _simBeatError = 0.2;
-  private _simAmplitude = 280;
-  private _simNoise = 0.05;
 
   private synthesizeEscapementPulse(amplitudeDeg: number, noiseLevel: number) {
     if (!this.audioCtx || !this.simTargetNode) return;
@@ -299,7 +306,10 @@ export class AudioEngine {
     const liftAngle = this.watchConfig.liftAngle;
     const clampedAmp = Math.max(120, Math.min(340, amplitudeDeg));
     const arg = Math.sin((liftAngle * Math.PI) / 180) / Math.sin((clampedAmp * Math.PI) / 180);
-    const deltaTSeconds = Math.max(0.004, Math.min(0.015, (targetPeriodMs / 1000 / Math.PI) * Math.asin(Math.min(0.99, arg))));
+    const deltaTSeconds = Math.max(
+      0.004,
+      Math.min(0.015, (targetPeriodMs / 1000 / Math.PI) * Math.asin(Math.min(0.99, arg)))
+    );
 
     const bufferSize = Math.floor(this.audioCtx.sampleRate * 0.035);
     const buffer = this.audioCtx.createBuffer(1, bufferSize, this.audioCtx.sampleRate);
@@ -341,43 +351,57 @@ export class AudioEngine {
 
     let sumSquares = 0;
     let peak = 0;
-    for (let i = 0; i < len; i++) {
-      const val = Math.abs(inputBuffer[i]);
-      if (val > peak) peak = val;
-      sumSquares += val * val;
-    }
-    const rms = Math.sqrt(sumSquares / len);
 
-    if (this.onLevel) {
-      this.onLevel(rms, peak);
+    for (let i = 0; i < len; i++) {
+      const val = inputBuffer[i];
+      const absVal = Math.abs(val);
+
+      this.ringBuffer[this.ringWriteHead] = val;
+      this.ringWriteHead = (this.ringWriteHead + 1) % this.RING_SIZE;
+
+      if (absVal > peak) peak = absVal;
+      sumSquares += absVal * absVal;
     }
+
+    const rms = Math.sqrt(sumSquares / len);
+    if (this.onLevel) this.onLevel(rms, peak);
 
     this.backgroundNoiseLevel = this.backgroundNoiseLevel * 0.95 + rms * 0.05;
 
     let threshold = this.audioSettings.sensitivityThreshold;
     if (this.audioSettings.autoThreshold) {
-      threshold = Math.max(this.audioSettings.noiseGate, this.backgroundNoiseLevel * 3.2);
+      threshold = Math.max(this.audioSettings.noiseGate, this.backgroundNoiseLevel * 3.5);
       this.adaptiveThreshold = threshold;
     }
 
-    const bufferStartSample = this.totalProcessedSamples;
+    const env = new Float32Array(len);
+    for (let i = 2; i < len - 2; i++) {
+      env[i] =
+        (Math.abs(inputBuffer[i - 2]) +
+          Math.abs(inputBuffer[i - 1]) +
+          Math.abs(inputBuffer[i]) +
+          Math.abs(inputBuffer[i + 1]) +
+          Math.abs(inputBuffer[i + 2])) / 5;
+    }
 
-    for (let i = 1; i < len - 1; i++) {
-      const absVal = Math.abs(inputBuffer[i]);
+    const chunkStartGlobalSample = this.totalProcessedSamples;
 
-      if (absVal > threshold && absVal >= Math.abs(inputBuffer[i - 1]) && absVal > Math.abs(inputBuffer[i + 1])) {
-        const y0 = Math.abs(inputBuffer[i - 1]);
-        const y1 = absVal;
-        const y2 = Math.abs(inputBuffer[i + 1]);
-        const denom = 2 * (y0 - 2 * y1 + y2);
-        const delta = denom !== 0 ? (y0 - y2) / denom : 0;
-        const subSampleOffset = Math.max(-0.5, Math.min(0.5, delta));
+    for (let i = 4; i < len - 4; i++) {
+      const val = env[i];
 
-        const absoluteSampleIndex = bufferStartSample + i + subSampleOffset;
+      if (
+        val > threshold &&
+          val >= env[i - 1] &&
+          val >= env[i - 2] &&
+          val > env[i + 1] &&
+          val > env[i + 2] &&
+          val > env[i - 4] * 1.6
+      ) {
+        const absoluteSampleIndex = chunkStartGlobalSample + i;
         const samplesSinceLast = absoluteSampleIndex - this.lastBeatSampleTime;
 
         if (samplesSinceLast >= this.lockoutSamples) {
-          this.handleDetectedBeat(inputBuffer, i, sampleRate, absoluteSampleIndex);
+          this.handleDetectedBeatFromRing(absoluteSampleIndex, sampleRate);
           this.lastBeatSampleTime = absoluteSampleIndex;
           break;
         }
@@ -387,35 +411,66 @@ export class AudioEngine {
     this.totalProcessedSamples += len;
   }
 
-  private handleDetectedBeat(
-    buffer: Float32Array,
-    peakIndexInBuffer: number,
-    sampleRate: number,
-    sampleTime: number
-  ) {
+  private handleDetectedBeatFromRing(globalTriggerSample: number, sampleRate: number) {
     this.beatCounter++;
     const now = performance.now();
 
-    // 40ms window, look back 20ms before T3 peak to capture T1 pulse reliably
-    const snippetSamples = Math.floor(0.04 * sampleRate);
-    const snippet = new Float32Array(snippetSamples);
-    const startIdx = Math.max(0, peakIndexInBuffer - Math.floor(0.02 * sampleRate));
-    for (let j = 0; j < snippetSamples; j++) {
-      if (startIdx + j < buffer.length) {
-        snippet[j] = buffer[startIdx + j];
+    const samplesAgo = this.totalProcessedSamples + 2048 - globalTriggerSample;
+    const triggerRingIdx = (this.ringWriteHead - samplesAgo + this.RING_SIZE) % this.RING_SIZE;
+
+    // 1. Scan forward/backward to find the local peak amplitude of this burst
+    const scanWindow = Math.floor(0.025 * sampleRate);
+    let localPeakAmp = 0;
+    let localPeakIdx = triggerRingIdx;
+
+    for (let k = -Math.floor(scanWindow / 2); k < scanWindow; k++) {
+      const idx = (triggerRingIdx + k + this.RING_SIZE) % this.RING_SIZE;
+      const absVal = Math.abs(this.ringBuffer[idx]);
+      if (absVal > localPeakAmp) {
+        localPeakAmp = absVal;
+        localPeakIdx = idx;
       }
+    }
+
+    // 2. Scan backward from local peak to find the true T1 leading edge
+    const t1Threshold = Math.max(localPeakAmp * 0.08, this.backgroundNoiseLevel * 1.2);
+    let trueT1Idx = localPeakIdx;
+    const maxBackScan = Math.floor(0.020 * sampleRate);
+
+    for (let k = 0; k < maxBackScan; k++) {
+      const idx = (localPeakIdx - k + this.RING_SIZE) % this.RING_SIZE;
+      if (Math.abs(this.ringBuffer[idx]) <= t1Threshold) {
+        trueT1Idx = (idx + 1) % this.RING_SIZE;
+        break;
+      }
+    }
+
+    // 3. Extract snippet anchored to true T1 with 2ms pre-roll
+    const snippetDurationSec = 0.045;
+    const preRollSec = 0.002;
+
+    const snippetSamples = Math.floor(snippetDurationSec * sampleRate);
+    const preRollSamples = Math.floor(preRollSec * sampleRate);
+    const startRingIdx = (trueT1Idx - preRollSamples + this.RING_SIZE) % this.RING_SIZE;
+
+    const snippet = new Float32Array(snippetSamples);
+    for (let j = 0; j < snippetSamples; j++) {
+      const rIdx = (startRingIdx + j) % this.RING_SIZE;
+      snippet[j] = this.ringBuffer[rIdx];
     }
 
     const targetPeriodMs = 3600000 / this.watchConfig.effectiveBph;
 
     let currentHalfPeriodMs = targetPeriodMs;
     if (this.lastBeatSampleTime > 0) {
-      const deltaSamples = sampleTime - this.lastBeatSampleTime;
+      const deltaSamples = globalTriggerSample - this.lastBeatSampleTime;
       currentHalfPeriodMs = (deltaSamples / sampleRate) * 1000;
 
-      if (currentHalfPeriodMs > targetPeriodMs * 1.65 || currentHalfPeriodMs < targetPeriodMs * 0.45) {
+      if (
+        currentHalfPeriodMs > targetPeriodMs * 1.60 ||
+          currentHalfPeriodMs < targetPeriodMs * 0.40
+      ) {
         this.previousHalfPeriodMs = 0;
-        this.lastBeatSampleTime = sampleTime;
         return;
       }
     }
@@ -434,26 +489,21 @@ export class AudioEngine {
     let beatErrorMs = 0.1;
 
     if (this.previousHalfPeriodMs > 0) {
-      // Correct Horological Beat Error: |T_tick - T_tock| / 2
       const rawBeatError = Math.abs(currentHalfPeriodMs - this.previousHalfPeriodMs) / 2;
-
-      // Keep raw beat error within realistic limits (0.0ms - 9.9ms)
       const boundedBeatError = Math.min(9.9, Math.max(0, rawBeatError));
 
-      // Rolling buffer for smooth UI readings (averages out acoustic jitter)
       this.recentBeatErrorsMs.push(boundedBeatError);
       if (this.recentBeatErrorsMs.length > 5) {
         this.recentBeatErrorsMs.shift();
       }
 
-      // Median/Average of recent beat errors
       const sortedErrors = [...this.recentBeatErrorsMs].sort((a, b) => a - b);
       beatErrorMs = sortedErrors[Math.floor(sortedErrors.length / 2)];
 
-      // Daily rate calculation on paired cycle (T_tick + T_tock)
       const fullCyclePeriodMs = currentHalfPeriodMs + this.previousHalfPeriodMs;
       const targetCyclePeriodMs = targetPeriodMs * 2;
-      const rawCycleRate = ((targetCyclePeriodMs - fullCyclePeriodMs) / targetCyclePeriodMs) * 86400;
+      const rawCycleRate =
+            ((targetCyclePeriodMs - fullCyclePeriodMs) / targetCyclePeriodMs) * 86400;
       const boundedRate = Math.max(-400, Math.min(400, rawCycleRate));
 
       this.recentCycleRates.push(boundedRate);
@@ -471,9 +521,8 @@ export class AudioEngine {
         rateErrorSecondsPerDay = boundedRate;
       }
     } else {
-      // First beat after a reset or start
       rateErrorSecondsPerDay = ((targetPeriodMs - currentHalfPeriodMs) / targetPeriodMs) * 86400;
-      beatErrorMs = 0.0; // Clean baseline on reset
+      beatErrorMs = 0.0;
     }
 
     this.previousHalfPeriodMs = currentHalfPeriodMs;
@@ -499,7 +548,6 @@ export class AudioEngine {
       waveformSnippet: snippet,
     };
 
-    // --- WARMUP GUARD FOR CANVAS / UI EMISSIONS ---
     const isWarmingUp =
           !this.isSimulating &&
             this.audioCtx &&
@@ -533,46 +581,63 @@ export class AudioEngine {
     targetPeriodMs: number,
     liftAngle: number
   ): { deltaTMs: number; amplitude: number } {
-    let maxVal = 0;
-    let maxIdx = 0;
-    for (let i = 0; i < snippet.length; i++) {
-      const val = Math.abs(snippet[i]);
-      if (val > maxVal) {
-        maxVal = val;
-        maxIdx = i;
-      }
+    const len = snippet.length;
+
+    // 1. Smooth envelope
+    const envelope = new Float32Array(len);
+    for (let i = 1; i < len - 1; i++) {
+      envelope[i] =
+        (Math.abs(snippet[i - 1]) + Math.abs(snippet[i]) + Math.abs(snippet[i + 1])) / 3;
     }
 
-    let deltaTMs = 6.8;
-    const t3Sample = maxIdx;
-    const minImpulseDistance = Math.floor(0.004 * sampleRate); // 4ms
-    const maxImpulseDistance = Math.floor(0.018 * sampleRate); // 18ms
+    // 2. Dynamic energy scan for first burst (T1)
+    let maxFirstBurstAmp = 0;
+    const searchLimit = Math.floor(0.015 * sampleRate);
+    for (let i = 0; i < searchLimit; i++) {
+      if (envelope[i] > maxFirstBurstAmp) maxFirstBurstAmp = envelope[i];
+    }
 
-    let t1Sample = Math.max(0, t3Sample - minImpulseDistance);
-    let earlyPeakVal = 0;
+    const t1Threshold = maxFirstBurstAmp * 0.15;
 
-    for (let i = Math.max(0, t3Sample - maxImpulseDistance); i < t3Sample - minImpulseDistance; i++) {
-      const val = Math.abs(snippet[i]);
-      if (val > earlyPeakVal) {
-        earlyPeakVal = val;
+    // 3. Locate T1 index directly within snippet
+    let t1Sample = 0;
+    for (let i = 0; i < searchLimit; i++) {
+      if (envelope[i] >= t1Threshold) {
         t1Sample = i;
+        break;
       }
     }
 
-    if (earlyPeakVal > 0.10 * maxVal) {
-      deltaTMs = ((t3Sample - t1Sample) / sampleRate) * 1000;
+    // 4. Locate T3 (Banking) peak relative to T1
+    const minT3Offset = Math.floor(0.0035 * sampleRate);
+    const maxT3Offset = Math.floor(0.0100 * sampleRate);
+
+    const searchStart = Math.min(len - 1, t1Sample + minT3Offset);
+    const searchEnd = Math.min(len - 1, t1Sample + maxT3Offset);
+
+    let t3Sample = searchStart;
+    let maxT3Energy = 0;
+
+    for (let i = searchStart; i <= searchEnd; i++) {
+      if (envelope[i] > maxT3Energy) {
+        maxT3Energy = envelope[i];
+        t3Sample = i;
+      }
     }
+
+    // 5. Calculate Delta T and Amplitude
+    let deltaTMs = ((t3Sample - t1Sample) / sampleRate) * 1000;
+    deltaTMs = Math.max(3.5, Math.min(12.0, deltaTMs));
 
     const liftAngleRad = (liftAngle * Math.PI) / 180;
     const omegaT = (Math.PI * deltaTMs) / targetPeriodMs;
     const sinVal = Math.sin(omegaT);
 
-    let amplitude = 220; // Default sensible fallback
+    let amplitude = 260;
     if (sinVal > 0.01) {
-      // Standard Horological Amplitude equation: LiftAngle / (2 * sin(pi * deltaT / T))
       const ampRad = liftAngleRad / (2 * sinVal);
       amplitude = Math.round((ampRad * 180) / Math.PI);
-      amplitude = Math.max(120, Math.min(360, amplitude));
+      amplitude = Math.max(120, Math.min(350, amplitude));
     }
 
     return { deltaTMs, amplitude };
@@ -649,20 +714,22 @@ export class AudioEngine {
     }
 
     this.recentIntervalsMs = [];
+    this.recentBeatErrorsMs = [];
     this.recentCycleRates = [];
     this.lastBeatSampleTime = 0;
     this.previousHalfPeriodMs = 0;
   }
 
-  public getIsRunning() {
+  // --- Public Getters required by App.tsx ---
+  public getIsRunning(): boolean {
     return this.isRunning;
   }
 
-  public getIsSimulating() {
+  public getIsSimulating(): boolean {
     return this.isSimulating;
   }
 
-  public getAdaptiveThreshold() {
+  public getAdaptiveThreshold(): number {
     return this.adaptiveThreshold;
   }
 }

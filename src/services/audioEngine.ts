@@ -418,39 +418,36 @@ export class AudioEngine {
     const samplesAgo = this.totalProcessedSamples + 2048 - globalTriggerSample;
     const triggerRingIdx = (this.ringWriteHead - samplesAgo + this.RING_SIZE) % this.RING_SIZE;
 
-    // 1. Scan forward/backward to find the local peak amplitude of this burst
-    const scanWindow = Math.floor(0.025 * sampleRate);
-    let localPeakAmp = 0;
-    let localPeakIdx = triggerRingIdx;
+    // 1. Locate the sharp leading edge of the trigger burst within a tight ±5ms window
+    const tightWindow = Math.floor(0.005 * sampleRate);
+    let peakAmp = 0;
+    let peakIdx = triggerRingIdx;
 
-    for (let k = -Math.floor(scanWindow / 2); k < scanWindow; k++) {
+    for (let k = -tightWindow; k <= tightWindow; k++) {
       const idx = (triggerRingIdx + k + this.RING_SIZE) % this.RING_SIZE;
       const absVal = Math.abs(this.ringBuffer[idx]);
-      if (absVal > localPeakAmp) {
-        localPeakAmp = absVal;
-        localPeakIdx = idx;
+      if (absVal > peakAmp) {
+        peakAmp = absVal;
+        peakIdx = idx;
       }
     }
 
-    // 2. Scan backward from local peak to find the true T1 leading edge
-    const t1Threshold = Math.max(localPeakAmp * 0.08, this.backgroundNoiseLevel * 1.2);
-    let trueT1Idx = localPeakIdx;
-    const maxBackScan = Math.floor(0.020 * sampleRate);
+    // 2. Scan backward to find t1 leading edge where signal rises above noise floor
+    const t1Threshold = Math.max(peakAmp * 0.35, this.backgroundNoiseLevel * 3.0);
+    let trueT1Idx = peakIdx;
+    const maxBackScan = Math.floor(0.008 * sampleRate);
 
     for (let k = 0; k < maxBackScan; k++) {
-      const idx = (localPeakIdx - k + this.RING_SIZE) % this.RING_SIZE;
+      const idx = (peakIdx - k + this.RING_SIZE) % this.RING_SIZE;
       if (Math.abs(this.ringBuffer[idx]) <= t1Threshold) {
-        trueT1Idx = (idx + 1) % this.RING_SIZE;
+        trueT1Idx = idx;
         break;
       }
     }
 
-    // 3. Extract snippet anchored to true T1 with 2ms pre-roll
-    const snippetDurationSec = 0.045;
-    const preRollSec = 0.002;
-
-    const snippetSamples = Math.floor(snippetDurationSec * sampleRate);
-    const preRollSamples = Math.floor(preRollSec * sampleRate);
+    // 3. Extract snippet anchored to true T1 with exact 2ms pre-roll
+    const snippetSamples = Math.floor(0.045 * sampleRate);
+    const preRollSamples = Math.floor(0.002 * sampleRate);
     const startRingIdx = (trueT1Idx - preRollSamples + this.RING_SIZE) % this.RING_SIZE;
 
     const snippet = new Float32Array(snippetSamples);
@@ -467,8 +464,8 @@ export class AudioEngine {
       currentHalfPeriodMs = (deltaSamples / sampleRate) * 1000;
 
       if (
-        currentHalfPeriodMs > targetPeriodMs * 1.60 ||
-          currentHalfPeriodMs < targetPeriodMs * 0.40
+        currentHalfPeriodMs > targetPeriodMs * 1.50 ||
+          currentHalfPeriodMs < targetPeriodMs * 0.50
       ) {
         this.previousHalfPeriodMs = 0;
         return;
@@ -583,51 +580,53 @@ export class AudioEngine {
   ): { deltaTMs: number; amplitude: number } {
     const len = snippet.length;
 
-    // 1. Smooth envelope
+    // 1. Calculate smoothed envelope
     const envelope = new Float32Array(len);
-    for (let i = 1; i < len - 1; i++) {
-      envelope[i] =
-        (Math.abs(snippet[i - 1]) + Math.abs(snippet[i]) + Math.abs(snippet[i + 1])) / 3;
+    const win = 2;
+    for (let i = win; i < len - win; i++) {
+      let sum = 0;
+      for (let k = -win; k <= win; k++) {
+        sum += Math.abs(snippet[i + k]);
+      }
+      envelope[i] = sum / (2 * win + 1);
     }
 
-    // 2. Dynamic energy scan for first burst (T1)
-    let maxFirstBurstAmp = 0;
-    const searchLimit = Math.floor(0.015 * sampleRate);
-    for (let i = 0; i < searchLimit; i++) {
-      if (envelope[i] > maxFirstBurstAmp) maxFirstBurstAmp = envelope[i];
+    // 2. Locate t1 (pre-roll offset is fixed at 2ms)
+    const preRollSamples = Math.floor(0.002 * sampleRate);
+    let t1Sample = preRollSamples;
+
+    let maxEnv = 0;
+    for (let i = preRollSamples; i < Math.floor(0.010 * sampleRate); i++) {
+      if (envelope[i] > maxEnv) maxEnv = envelope[i];
     }
 
-    const t1Threshold = maxFirstBurstAmp * 0.15;
-
-    // 3. Locate T1 index directly within snippet
-    let t1Sample = 0;
-    for (let i = 0; i < searchLimit; i++) {
-      if (envelope[i] >= t1Threshold) {
+    const t1Thresh = Math.max(maxEnv * 0.25, 0.01);
+    for (let i = preRollSamples; i < Math.floor(0.010 * sampleRate); i++) {
+      if (envelope[i] >= t1Thresh) {
         t1Sample = i;
         break;
       }
     }
 
-    // 4. Locate T3 (Banking) peak relative to T1
-    const minT3Offset = Math.floor(0.0035 * sampleRate);
-    const maxT3Offset = Math.floor(0.0100 * sampleRate);
-
-    const searchStart = Math.min(len - 1, t1Sample + minT3Offset);
-    const searchEnd = Math.min(len - 1, t1Sample + maxT3Offset);
+    // 3. Locate t3 (Banking/Drop impact burst)
+    // Typical escapement impulse duration is between 4ms and 14ms
+    const searchStart = t1Sample + Math.floor(0.004 * sampleRate);
+    const searchEnd = Math.min(len - 1, t1Sample + Math.floor(0.016 * sampleRate));
 
     let t3Sample = searchStart;
-    let maxT3Energy = 0;
+    let maxT3Value = 0;
 
     for (let i = searchStart; i <= searchEnd; i++) {
-      if (envelope[i] > maxT3Energy) {
-        maxT3Energy = envelope[i];
+      // Find local peak onset in the search window
+      if (envelope[i] > maxT3Value && envelope[i] > envelope[i - 1] && envelope[i] >= envelope[i + 1]) {
+        maxT3Value = envelope[i];
         t3Sample = i;
       }
     }
 
-    // 5. Calculate Delta T and Amplitude
+    // 4. Calculate Delta T and Amplitude
     let deltaTMs = ((t3Sample - t1Sample) / sampleRate) * 1000;
-    deltaTMs = Math.max(3.5, Math.min(12.0, deltaTMs));
+    deltaTMs = Math.max(3.0, Math.min(16.0, deltaTMs));
 
     const liftAngleRad = (liftAngle * Math.PI) / 180;
     const omegaT = (Math.PI * deltaTMs) / targetPeriodMs;

@@ -20,6 +20,7 @@ export const DEFAULT_AUDIO_SETTINGS: Readonly<AudioSettings> = Object.freeze({
   lockoutRatio: 0.65,
   noiseGate: 0.02,
   warmUpDelay: 1,
+  debug: false,
 });
 
 export const DEFAULT_WATCH_CONFIG: Readonly<WatchConfig> = Object.freeze({

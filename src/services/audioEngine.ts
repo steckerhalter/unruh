@@ -1,6 +1,6 @@
 /**
  * Unruh Web Audio DSP Engine
- * Fixes waveform trace jumping using a continuous audio ring buffer and 
+ * Fixes waveform trace jumping using a continuous audio ring buffer and
  * fixed-offset T1 edge alignment across Web Audio processing chunks.
  */
 
@@ -418,7 +418,7 @@ export class AudioEngine {
     const samplesAgo = this.totalProcessedSamples + 2048 - globalTriggerSample;
     const triggerRingIdx = (this.ringWriteHead - samplesAgo + this.RING_SIZE) % this.RING_SIZE;
 
-    // 1. Locate the sharp leading edge of the trigger burst within a tight ±5ms window
+    // 1. Locate peak burst near trigger
     const tightWindow = Math.floor(0.005 * sampleRate);
     let peakAmp = 0;
     let peakIdx = triggerRingIdx;
@@ -432,10 +432,10 @@ export class AudioEngine {
       }
     }
 
-    // 2. Scan backward to find t1 leading edge where signal rises above noise floor
-    const t1Threshold = Math.max(peakAmp * 0.35, this.backgroundNoiseLevel * 3.0);
+    // 2. Scan backward to locate T1 leading edge onset
+    const t1Threshold = Math.max(peakAmp * 0.25, this.backgroundNoiseLevel * 2.5);
     let trueT1Idx = peakIdx;
-    const maxBackScan = Math.floor(0.008 * sampleRate);
+    const maxBackScan = Math.floor(0.010 * sampleRate);
 
     for (let k = 0; k < maxBackScan; k++) {
       const idx = (peakIdx - k + this.RING_SIZE) % this.RING_SIZE;
@@ -445,7 +445,7 @@ export class AudioEngine {
       }
     }
 
-    // 3. Extract snippet anchored to true T1 with exact 2ms pre-roll
+    // 3. Extract snippet anchored with exactly 2ms pre-roll before T1
     const snippetSamples = Math.floor(0.045 * sampleRate);
     const preRollSamples = Math.floor(0.002 * sampleRate);
     const startRingIdx = (trueT1Idx - preRollSamples + this.RING_SIZE) % this.RING_SIZE;
@@ -525,12 +525,20 @@ export class AudioEngine {
     this.previousHalfPeriodMs = currentHalfPeriodMs;
     this.isTickTurn = !this.isTickTurn;
 
-    const { deltaTMs, amplitude } = this.analyzeEscapementImpulses(
+    const { deltaTMs, amplitude, t1Ms, t2Ms, t3Ms } = this.analyzeEscapementImpulses(
       snippet,
       sampleRate,
       targetPeriodMs,
       this.watchConfig.liftAngle
     );
+
+    // Debugging verification outputs
+    if (this.audioSettings.debug === true) {
+      console.log(
+        `[AudioEngine Beat #${this.beatCounter}] T1: ${t1Ms.toFixed(2)}ms | T2: ${t2Ms.toFixed(2)}ms | T3: ${t3Ms.toFixed(2)}ms | Δt: ${deltaTMs.toFixed(2)}ms | Amp: ${amplitude}°`
+      );
+      this.debugInspectSnippet(snippet, sampleRate, t1Ms, t2Ms, t3Ms);
+    }
 
     const measurement: BeatMeasurement = {
       id: this.beatCounter,
@@ -542,6 +550,9 @@ export class AudioEngine {
       amplitudeDeg: amplitude,
       isTick: this.isTickTurn,
       deltaTImpulseMs: deltaTMs,
+      t1Ms,
+      t2Ms,
+      t3Ms,
       waveformSnippet: snippet,
     };
 
@@ -577,12 +588,12 @@ export class AudioEngine {
     sampleRate: number,
     targetPeriodMs: number,
     liftAngle: number
-  ): { deltaTMs: number; amplitude: number } {
+  ): { deltaTMs: number; amplitude: number; t1Ms: number; t2Ms: number; t3Ms: number } {
     const len = snippet.length;
 
     // 1. Calculate smoothed envelope
     const envelope = new Float32Array(len);
-    const win = 2;
+    const win = 3;
     for (let i = win; i < len - win; i++) {
       let sum = 0;
       for (let k = -win; k <= win; k++) {
@@ -591,43 +602,56 @@ export class AudioEngine {
       envelope[i] = sum / (2 * win + 1);
     }
 
-    // 2. Locate t1 (pre-roll offset is fixed at 2ms)
+    // 2. Fixed T1 relative to pre-roll anchor (2ms pre-roll)
     const preRollSamples = Math.floor(0.002 * sampleRate);
-    let t1Sample = preRollSamples;
+    const t1Sample = preRollSamples; // T1 is exact anchor at 2.0ms
 
-    let maxEnv = 0;
-    for (let i = preRollSamples; i < Math.floor(0.010 * sampleRate); i++) {
-      if (envelope[i] > maxEnv) maxEnv = envelope[i];
+    // 3. Locate T2 (Impulse end / drop phase start)
+    const t2SearchStart = t1Sample + Math.floor(0.0025 * sampleRate);
+    const t2SearchEnd = t1Sample + Math.floor(0.0075 * sampleRate);
+    let t2PeakIdx = t2SearchStart;
+    let t2MaxVal = 0;
+
+    for (let i = t2SearchStart; i <= t2SearchEnd; i++) {
+      if (envelope[i] > t2MaxVal) {
+        t2MaxVal = envelope[i];
+        t2PeakIdx = i;
+      }
+    }
+    const t2Sample = t2PeakIdx;
+
+    // 4. Locate T3 (Banking impact onset)
+    const t3SearchStart = t1Sample + Math.floor(0.0050 * sampleRate);
+    const t3SearchEnd = Math.min(len - 1, t1Sample + Math.floor(0.0160 * sampleRate));
+
+    let t3PeakIdx = t3SearchStart;
+    let t3MaxVal = 0;
+    for (let i = t3SearchStart; i <= t3SearchEnd; i++) {
+      if (envelope[i] > t3MaxVal) {
+        t3MaxVal = envelope[i];
+        t3PeakIdx = i;
+      }
     }
 
-    const t1Thresh = Math.max(maxEnv * 0.25, 0.01);
-    for (let i = preRollSamples; i < Math.floor(0.010 * sampleRate); i++) {
-      if (envelope[i] >= t1Thresh) {
-        t1Sample = i;
+    // Back-scan from T3 peak to isolate exact leading edge onset of T3
+    const t3Threshold = t3MaxVal * 0.20;
+    let t3Sample = t3PeakIdx;
+    for (let i = t3PeakIdx; i > t3SearchStart; i--) {
+      if (envelope[i] <= t3Threshold) {
+        t3Sample = i;
         break;
       }
     }
 
-    // 3. Locate t3 (Banking/Drop impact burst)
-    // Typical escapement impulse duration is between 4ms and 14ms
-    const searchStart = t1Sample + Math.floor(0.004 * sampleRate);
-    const searchEnd = Math.min(len - 1, t1Sample + Math.floor(0.016 * sampleRate));
+    // 5. Convert indices to time offsets (ms)
+    const t1Ms = (t1Sample / sampleRate) * 1000;
+    const t2Ms = (t2Sample / sampleRate) * 1000;
+    const t3Ms = (t3Sample / sampleRate) * 1000;
 
-    let t3Sample = searchStart;
-    let maxT3Value = 0;
-
-    for (let i = searchStart; i <= searchEnd; i++) {
-      // Find local peak onset in the search window
-      if (envelope[i] > maxT3Value && envelope[i] > envelope[i - 1] && envelope[i] >= envelope[i + 1]) {
-        maxT3Value = envelope[i];
-        t3Sample = i;
-      }
-    }
-
-    // 4. Calculate Delta T and Amplitude
-    let deltaTMs = ((t3Sample - t1Sample) / sampleRate) * 1000;
+    let deltaTMs = t3Ms - t1Ms;
     deltaTMs = Math.max(3.0, Math.min(16.0, deltaTMs));
 
+    // 6. Amplitude Calculation
     const liftAngleRad = (liftAngle * Math.PI) / 180;
     const omegaT = (Math.PI * deltaTMs) / targetPeriodMs;
     const sinVal = Math.sin(omegaT);
@@ -639,7 +663,26 @@ export class AudioEngine {
       amplitude = Math.max(120, Math.min(350, amplitude));
     }
 
-    return { deltaTMs, amplitude };
+    return { deltaTMs, amplitude, t1Ms, t2Ms, t3Ms };
+  }
+
+  private debugInspectSnippet(
+    snippet: Float32Array,
+    sampleRate: number,
+    t1Ms: number,
+    t2Ms: number,
+    t3Ms: number
+  ) {
+    const t1Idx = Math.round((t1Ms / 1000) * sampleRate);
+    const t2Idx = Math.round((t2Ms / 1000) * sampleRate);
+    const t3Idx = Math.round((t3Ms / 1000) * sampleRate);
+
+    console.groupCollapsed(`[Snippet Sample Inspection - Beat #${this.beatCounter}]`);
+    console.log(`Sample Rate: ${sampleRate} Hz | Total Snippet Samples: ${snippet.length}`);
+    console.log(`T1 (Unlock) Index: ${t1Idx} [Val: ${snippet[t1Idx]?.toFixed(4)}]`);
+    console.log(`T2 (Impulse) Index: ${t2Idx} [Val: ${snippet[t2Idx]?.toFixed(4)}]`);
+    console.log(`T3 (Banking) Index: ${t3Idx} [Val: ${snippet[t3Idx]?.toFixed(4)}]`);
+    console.groupEnd();
   }
 
   private checkAutoBph() {

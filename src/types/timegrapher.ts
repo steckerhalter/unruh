@@ -46,6 +46,7 @@ export interface AudioSettings {
   lockoutRatio: number; // 0.5 to 0.75 of expected beat period
   noiseGate: number; // minimum level
   warmUpDelay: number;
+  debug: boolean;
 }
 
 export interface WatchConfig {

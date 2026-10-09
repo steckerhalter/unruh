@@ -97,11 +97,15 @@ export const EscapementOscilloscope: React.FC<Props> = ({ latestBeat, liftAngle 
       }
       ctx.stroke();
 
-      // Peak impact markers: Unlocking (t1), Impulse (t2), Drop/Banking (t3)
-      const t1Ratio = 0.22;
-      const deltaRatio = Math.min(0.4, (activeBeat.deltaTImpulseMs / 25));
-      const t3Ratio = t1Ratio + deltaRatio;
-      const t2Ratio = t1Ratio + deltaRatio * 0.45;
+      // Snippet total duration in ms (45ms at 48kHz = 2160 samples)
+      // Assuming 48kHz sample rate; snippet length / 48
+      const sampleRate = 48000;
+      const totalSnippetMs = (len / sampleRate) * 1000;
+
+      // Map dynamic timestamps to snippet relative ratios
+      const t1Ratio = Math.min(1.0, Math.max(0.0, activeBeat.t1Ms / totalSnippetMs));
+      const t2Ratio = Math.min(1.0, Math.max(0.0, activeBeat.t2Ms / totalSnippetMs));
+      const t3Ratio = Math.min(1.0, Math.max(0.0, activeBeat.t3Ms / totalSnippetMs));
 
       const t1X = padL + t1Ratio * plotW;
       const t2X = padL + t2Ratio * plotW;

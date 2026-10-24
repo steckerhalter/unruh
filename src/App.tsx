@@ -152,6 +152,38 @@ export default function App() {
     }
   }, [watchConfig]);
 
+  // Keep screen awake using the Screen Wake Lock API
+  useEffect(() => {
+    let wakeLock: WakeLockSentinel | null = null;
+
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator && isRunning) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {
+          console.warn('Screen Wake Lock error:', err);
+        }
+      }
+    };
+
+    requestWakeLock();
+
+    // Re-aquire lock when tab visibility changes (e.g. user switches tabs and returns)
+    const handleVisibilityChange = () => {
+      if (wakeLock !== null && document.visibilityState === 'visible' && isRunning) {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLock) {
+        wakeLock.release().catch(() => {});
+      }
+    };
+  }, [isRunning]);
 
   // Toggle Live Microphone input
   const handleToggleMicrophone = async () => {

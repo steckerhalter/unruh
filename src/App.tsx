@@ -428,6 +428,14 @@ export default function App() {
             <span className="hidden sm:inline">Piezo DSP</span>
           </button>
 
+          <button
+            onClick={handleToggleMonitoring}
+            className="flex px-2.5 py-1 rounded-md"
+            title="Audio monitoring — make sure before activation that the recording and output devices do not create a feedback loop!"
+          >
+            {isMonitoring ? '🔊' : '🔇'}
+          </button>
+
           {/* Live Mic vs Simulator Toggle */}
           <div className="flex items-center gap-0.5 bg-[#f5f0e4] p-0.5 rounded-lg border border-[#ded5c5]">
             <button
@@ -441,14 +449,6 @@ export default function App() {
             >
               <Mic className="w-3.5 h-3.5 text-emerald-700" />
               <span>{!isSimulating && isRunning ? 'Mic Active' : 'Live Mic'}</span>
-            </button>
-
-            <button
-              onClick={handleToggleMonitoring}
-              className="px-3 py-1 text-[#78350f] rounded hover:bg-[#fef3c7]"
-              title="Audio monitoring — make sure before activation that the recording device and the speaker are not creating a feedback loop!"
-            >
-              {isMonitoring ? '🔊' : '🔇'}
             </button>
 
             <button

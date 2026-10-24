@@ -137,6 +137,14 @@ export default function App() {
     }
   };
 
+  const [isMonitoring, setIsMonitoring] = useState(false);
+
+  const handleToggleMonitoring = () => {
+    const nextState = !isMonitoring;
+    setIsMonitoring(nextState);
+    engineRef.current?.setAudioMonitoring(nextState, 0.4);
+  };
+
   // Update integration window on engine
   useEffect(() => {
     if (engineRef.current) {
@@ -216,6 +224,7 @@ export default function App() {
       const success = await engineRef.current.startMicrophone(audioSettings.deviceId);
       if (success) {
         setIsRunning(true);
+        engineRef.current?.setAudioMonitoring(isMonitoring, 0.4);
         setTimeout(() => {
           setIsInitializing(false);
         }, audioSettings.warmUpDelay*1000);
@@ -432,6 +441,13 @@ export default function App() {
             >
               <Mic className="w-3.5 h-3.5 text-emerald-700" />
               <span>{!isSimulating && isRunning ? 'Mic Active' : 'Live Mic'}</span>
+            </button>
+
+            <button
+              onClick={handleToggleMonitoring}
+              className="px-3 py-1 text-[#78350f] rounded hover:bg-[#fef3c7]"
+            >
+              {isMonitoring ? '🔊' : '🔇'}
             </button>
 
             <button

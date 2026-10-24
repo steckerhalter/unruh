@@ -24,6 +24,7 @@ export class AudioEngine {
   private mediaStream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private gainNode: GainNode | null = null;
+  private monitorGainNode: GainNode | null = null;
   private highPassNode: BiquadFilterNode | null = null;
   private bandPassNode: BiquadFilterNode | null = null;
   private analyserNode: AnalyserNode | null = null;
@@ -35,6 +36,8 @@ export class AudioEngine {
 
   private isRunning: boolean = false;
   private isSimulating: boolean = false;
+  private isMonitoringActive: boolean = false;
+  private monitorVolumeLevel: number = 0.5;
 
   // Callback handlers
   public onBeat?: (beat: BeatMeasurement) => void;
@@ -128,6 +131,28 @@ export class AudioEngine {
     this.lockoutSamples = Math.floor((minLockoutMs / 1000) * sampleRate);
   }
 
+  public setAudioMonitoring(enabled: boolean, volume?: number) {
+    this.isMonitoringActive = enabled;
+    if (volume !== undefined) {
+      this.monitorVolumeLevel = Math.max(0, Math.min(1.0, volume));
+    }
+    if (this.monitorGainNode && this.audioCtx) {
+      const targetGain = this.isMonitoringActive ? this.monitorVolumeLevel : 0.0;
+      this.monitorGainNode.gain.setValueAtTime(targetGain, this.audioCtx.currentTime);
+    }
+  }
+
+  public getIsMonitoring(): boolean {
+    return this.isMonitoringActive;
+  }
+
+  public setMonitorVolume(volume: number) {
+    this.monitorVolumeLevel = Math.max(0, Math.min(1.0, volume));
+    if (this.monitorGainNode && this.audioCtx && this.isMonitoringActive) {
+      this.monitorGainNode.gain.setValueAtTime(this.monitorVolumeLevel, this.audioCtx.currentTime);
+    }
+  }
+
   public async startMicrophone(deviceId?: string): Promise<boolean> {
     try {
       this.stop();
@@ -167,6 +192,12 @@ export class AudioEngine {
       this.gainNode = this.audioCtx.createGain();
       this.gainNode.gain.setValueAtTime(this.audioSettings.gainMultiplier, now);
 
+      this.monitorGainNode = this.audioCtx.createGain();
+      this.monitorGainNode.gain.setValueAtTime(
+        this.isMonitoringActive ? this.monitorVolumeLevel : 0.0,
+        now
+      );
+
       this.highPassNode = this.audioCtx.createBiquadFilter();
       this.highPassNode.type = 'highpass';
       this.highPassNode.frequency.setValueAtTime(2200, now);
@@ -184,12 +215,18 @@ export class AudioEngine {
       this.processorNode = this.audioCtx.createScriptProcessor(2048, 1, 1);
       this.processorNode.onaudioprocess = (e) => this.processAudioBuffer(e);
 
+      // Connect DSP chain
       this.sourceNode.connect(this.gainNode);
       this.gainNode.connect(this.highPassNode);
       this.highPassNode.connect(this.bandPassNode);
       this.bandPassNode.connect(this.analyserNode);
       this.bandPassNode.connect(this.processorNode);
 
+      // Connect monitor chain separately to destination (speakers/headphones)
+      this.sourceNode.connect(this.monitorGainNode);
+      this.monitorGainNode.connect(this.audioCtx.destination);
+
+      // Dummy connection for ScriptProcessor to run
       const muteGain = this.audioCtx.createGain();
       muteGain.gain.setValueAtTime(0, now);
       this.processorNode.connect(muteGain);
@@ -238,12 +275,20 @@ export class AudioEngine {
     this.ringWriteHead = 0;
     this.ringBuffer.fill(0);
 
+    const now = this.audioCtx.currentTime;
+
     this.gainNode = this.audioCtx.createGain();
-    this.gainNode.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
+    this.gainNode.gain.setValueAtTime(1.0, now);
+
+    this.monitorGainNode = this.audioCtx.createGain();
+    this.monitorGainNode.gain.setValueAtTime(
+      this.isMonitoringActive ? this.monitorVolumeLevel : 0.0,
+      now
+    );
 
     this.highPassNode = this.audioCtx.createBiquadFilter();
     this.highPassNode.type = 'highpass';
-    this.highPassNode.frequency.setValueAtTime(400, this.audioCtx.currentTime);
+    this.highPassNode.frequency.setValueAtTime(400, now);
 
     this.analyserNode = this.audioCtx.createAnalyser();
     this.analyserNode.fftSize = 1024;
@@ -257,8 +302,12 @@ export class AudioEngine {
     this.highPassNode.connect(this.analyserNode);
     this.highPassNode.connect(this.processorNode);
 
+    // Simulator speaker monitoring connection
+    this.simTargetNode.connect(this.monitorGainNode);
+    this.monitorGainNode.connect(this.audioCtx.destination);
+
     const muteGain = this.audioCtx.createGain();
-    muteGain.gain.setValueAtTime(0.001, this.audioCtx.currentTime);
+    muteGain.gain.setValueAtTime(0.001, now);
     this.processorNode.connect(muteGain);
     muteGain.connect(this.audioCtx.destination);
 
@@ -741,6 +790,10 @@ export class AudioEngine {
     if (this.gainNode) {
       this.gainNode.disconnect();
       this.gainNode = null;
+    }
+    if (this.monitorGainNode) {
+      this.monitorGainNode.disconnect();
+      this.monitorGainNode = null;
     }
     if (this.sourceNode) {
       this.sourceNode.disconnect();

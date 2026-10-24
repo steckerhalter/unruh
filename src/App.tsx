@@ -160,17 +160,28 @@ export default function App() {
       if ('wakeLock' in navigator && isRunning) {
         try {
           wakeLock = await navigator.wakeLock.request('screen');
-        } catch (err) {
-          console.warn('Screen Wake Lock error:', err);
+          if (audioSettings.debug) {
+            console.log('SUCCESS: Screen Wake Lock has been granted.');
+          }
+        } catch (err: any) {
+          if (audioSettings.debug) {
+            console.warn(`REJECTED: Screen Wake Lock error -> ${err.name}: ${err.message}`);
+          }
+        }
+      } else {
+        if (audioSettings.debug) {
+          console.log('SKIPPED: Wake Lock API not supported or isRunning is false.');
         }
       }
     };
 
     requestWakeLock();
 
-    // Re-aquire lock when tab visibility changes (e.g. user switches tabs and returns)
     const handleVisibilityChange = () => {
       if (wakeLock !== null && document.visibilityState === 'visible' && isRunning) {
+        if (audioSettings.debug) {
+          console.log('VISIBILITY CHANGE: Re-requesting wake lock...');
+        }
         requestWakeLock();
       }
     };
@@ -181,6 +192,9 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (wakeLock) {
         wakeLock.release().catch(() => {});
+        if (audioSettings.debug) {
+          console.log('CLEANUP: Screen Wake Lock released.');
+        }
       }
     };
   }, [isRunning]);

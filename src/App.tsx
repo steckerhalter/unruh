@@ -446,6 +446,7 @@ export default function App() {
             <button
               onClick={handleToggleMonitoring}
               className="px-3 py-1 text-[#78350f] rounded hover:bg-[#fef3c7]"
+              title="Audio monitoring — make sure before activation that the recording device and the speaker are not creating a feedback loop!"
             >
               {isMonitoring ? '🔊' : '🔇'}
             </button>

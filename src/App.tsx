@@ -753,7 +753,7 @@ export default function App() {
                       Filter Window:
                     </span>
                     <div className="flex items-center gap-1">
-                      {[2, 12, 30].map((sec) => (
+                      {[5, 60, 120].map((sec) => (
                         <button
                           key={sec}
                           onClick={() => setIntegrationSec(sec)}

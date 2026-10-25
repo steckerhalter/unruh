@@ -50,8 +50,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [yScaleMode] = useState<YScaleMode>('auto-lock');
-  // Smooth enabled by default
-  const [isSmoothed, setIsSmoothed] = useState<boolean>(true);
+  const [isSmoothed, setIsSmoothed] = useState<boolean>(false);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; measurement: BeatMeasurement } | null>(null);
 
   // Auto-lock bounds: recalculates and locks strictly every 5 seconds

@@ -58,7 +58,7 @@ export default function App() {
   const [fingerprintMatch, setFingerprintMatch] = useState<FingerprintMatch | null>(null);
 
   // Integration / Stabilization window (like physical Witschi/Weishi timegraphers)
-  const [integrationSec, setIntegrationSec] = useState<number>(12);
+  const [integrationSec, setIntegrationSec] = useState<number>(5);
 
   // Settings
   const [watchConfig, setWatchConfig] = useState<WatchConfig>(DEFAULT_WATCH_CONFIG);

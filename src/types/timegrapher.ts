@@ -100,6 +100,8 @@ export interface WatchAcousticProfile {
   dateCreated: number;
   timesRecognized: number;
   notes?: string;
+  /** Set when the profile was created by the user (Name Watch): it gets a small score boost and holds the lock while active. */
+  userRegistered?: boolean;
 }
 
 export interface FingerprintMatch {

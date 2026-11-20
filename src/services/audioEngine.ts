@@ -354,9 +354,12 @@ export class AudioEngine {
     const targetPeriodMs = 3600000 / this.watchConfig.effectiveBph;
     const liftAngle = this.watchConfig.liftAngle;
     const clampedAmp = Math.max(120, Math.min(340, amplitudeDeg));
-    const arg = Math.sin((liftAngle * Math.PI) / 180) / Math.sin((clampedAmp * Math.PI) / 180);
+    // The analyzer derives amplitude as A = liftAngle / (2 * sin(pi * dt / T)),
+    // so the simulator places its impulses at dt = (T / pi) * asin(liftAngle / (2 * amp))
+    // to make the analyzed amplitude come back as the preset amplitude.
+    const arg = liftAngle / (2 * clampedAmp);
     const deltaTSeconds = Math.max(
-      0.004,
+      0.0029,
       Math.min(0.015, (targetPeriodMs / 1000 / Math.PI) * Math.asin(Math.min(0.99, arg)))
     );
 
@@ -640,7 +643,7 @@ export class AudioEngine {
   ): { deltaTMs: number; amplitude: number; t1Ms: number; t2Ms: number; t3Ms: number } {
     const len = snippet.length;
 
-    // 1. Calculate smoothed envelope
+    // 1. Calculate smoothed envelope (moving average of |signal| over ±3 samples)
     const envelope = new Float32Array(len);
     const win = 3;
     for (let i = win; i < len - win; i++) {
@@ -655,44 +658,44 @@ export class AudioEngine {
     const preRollSamples = Math.floor(0.002 * sampleRate);
     const t1Sample = preRollSamples; // T1 is exact anchor at 2.0ms
 
-    // 3. Locate T2 (Impulse end / drop phase start)
-    const t2SearchStart = t1Sample + Math.floor(0.0025 * sampleRate);
-    const t2SearchEnd = t1Sample + Math.floor(0.0075 * sampleRate);
-    let t2PeakIdx = t2SearchStart;
-    let t2MaxVal = 0;
-
-    for (let i = t2SearchStart; i <= t2SearchEnd; i++) {
-      if (envelope[i] > t2MaxVal) {
-        t2MaxVal = envelope[i];
-        t2PeakIdx = i;
-      }
-    }
-    const t2Sample = t2PeakIdx;
-
-    // 4. Locate T3 (Banking impact onset)
-    const t3SearchStart = t1Sample + Math.floor(0.0050 * sampleRate);
+    // 3. Locate T3 (banking impact): the strongest envelope feature in the
+    //    late window after the impulse.
+    const t3SearchStart = t1Sample + Math.floor(0.0025 * sampleRate);
     const t3SearchEnd = Math.min(len - 1, t1Sample + Math.floor(0.0160 * sampleRate));
-
     let t3PeakIdx = t3SearchStart;
-    let t3MaxVal = 0;
+    let t3PeakVal = 0;
     for (let i = t3SearchStart; i <= t3SearchEnd; i++) {
-      if (envelope[i] > t3MaxVal) {
-        t3MaxVal = envelope[i];
+      if (envelope[i] > t3PeakVal) {
+        t3PeakVal = envelope[i];
         t3PeakIdx = i;
       }
     }
 
-    // Back-scan from T3 peak to isolate exact leading edge onset of T3
-    const t3Threshold = t3MaxVal * 0.20;
+    // 4. Locate T2 (impulse): the strongest envelope feature between T1 and
+    //    the banking peak.
+    const t2RangeStart = Math.floor(0.0030 * sampleRate);
+    const t2RangeEnd = Math.max(t2RangeStart + 1, t3PeakIdx - Math.floor(0.002 * sampleRate));
+    let t2Sample = t2RangeEnd;
+    let t2MaxVal = 0;
+    for (let i = t2RangeStart; i <= t2RangeEnd; i++) {
+      if (envelope[i] > t2MaxVal) {
+        t2MaxVal = envelope[i];
+        t2Sample = i;
+      }
+    }
+
+    // 5. Locate T3 onset: the banking's leading edge — the first index of the
+    //    banking rise, where the envelope passes the impulse level plus a margin.
+    const t3Threshold = t2MaxVal + 0.05;
     let t3Sample = t3PeakIdx;
-    for (let i = t3PeakIdx; i > t3SearchStart; i--) {
-      if (envelope[i] <= t3Threshold) {
+    for (let i = t3SearchStart; i <= t3PeakIdx; i++) {
+      if (envelope[i] > t3Threshold) {
         t3Sample = i;
         break;
       }
     }
 
-    // 5. Convert indices to time offsets (ms)
+    // 6. Convert indices to time offsets (ms)
     const t1Ms = (t1Sample / sampleRate) * 1000;
     const t2Ms = (t2Sample / sampleRate) * 1000;
     const t3Ms = (t3Sample / sampleRate) * 1000;
@@ -700,7 +703,7 @@ export class AudioEngine {
     let deltaTMs = t3Ms - t1Ms;
     deltaTMs = Math.max(3.0, Math.min(16.0, deltaTMs));
 
-    // 6. Amplitude Calculation
+    // 7. Amplitude Calculation
     const liftAngleRad = (liftAngle * Math.PI) / 180;
     const omegaT = (Math.PI * deltaTMs) / targetPeriodMs;
     const sinVal = Math.sin(omegaT);

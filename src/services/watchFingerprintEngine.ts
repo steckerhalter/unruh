@@ -295,7 +295,10 @@ export class WatchFingerprintEngine {
       const spectralScore = dotProd / (Math.sqrt(magA) * Math.sqrt(magB) || 1);
 
       // Total weighted confidence (0 - 100)
-      const confidence = (bphScore * 0.45 + deltaTScore * 0.25 + resScore * 0.15 + spectralScore * 0.15) * 100;
+      const baseConfidence = (bphScore * 0.45 + deltaTScore * 0.25 + resScore * 0.15 + spectralScore * 0.15) * 100;
+      // User-named watches (registered profiles) get a small boost so they outrank
+      // similarly-scoring seeded profiles when the watch is on the bench.
+      const confidence = profile.userRegistered ? baseConfidence + 10 : baseConfidence;
 
       if (confidence > topConfidence) {
         topConfidence = confidence;
@@ -325,18 +328,23 @@ export class WatchFingerprintEngine {
 
       // Check if a different profile is overwhelmingly matching (> 80% for multiple evaluations)
       if (topProfile && topProfile.id !== this.lockedProfile.id && topConfidence >= 80) {
-        if (this.candidateProfile?.id === topProfile.id) {
-          this.candidateStreak++;
-          if (this.candidateStreak >= 4) {
-            // Switch lock to the new profile
-            this.lockedProfile = topProfile;
-            this.lockedConfidence = topConfidence;
-            this.candidateStreak = 0;
-            this.dropoutStreak = 0;
+        // A user-named watch holds its lock while the top profile isn't clearly better
+        const holdUserLock =
+          this.lockedProfile.userRegistered === true && topConfidence <= this.lockedConfidence + 10;
+        if (!holdUserLock) {
+          if (this.candidateProfile?.id === topProfile.id) {
+            this.candidateStreak++;
+            if (this.candidateStreak >= 4) {
+              // Switch lock to the new profile
+              this.lockedProfile = topProfile;
+              this.lockedConfidence = topConfidence;
+              this.candidateStreak = 0;
+              this.dropoutStreak = 0;
+            }
+          } else {
+            this.candidateProfile = topProfile;
+            this.candidateStreak = 1;
           }
-        } else {
-          this.candidateProfile = topProfile;
-          this.candidateStreak = 1;
         }
       } else if (lockedProfileScore < DROPOUT_THRESHOLD) {
         this.dropoutStreak++;
@@ -450,6 +458,7 @@ export class WatchFingerprintEngine {
       dateCreated: Date.now(),
       timesRecognized: 1,
       notes,
+      userRegistered: true,
     };
 
     this.profiles.unshift(newProfile);
@@ -479,3 +488,9 @@ export class WatchFingerprintEngine {
 }
 
 export const globalWatchFingerprinter = new WatchFingerprintEngine();
+
+// Dev affordance: expose the singleton for debugging from the page
+// (e.g. `globalWatchFingerprinter.registerWatchProfile(...)` from the console).
+if (typeof window !== 'undefined') {
+  (window as any).__globalWatchFingerprinter = globalWatchFingerprinter;
+}

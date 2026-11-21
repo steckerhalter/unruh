@@ -11,7 +11,7 @@ import {
   FingerprintMatch,
   WatchAcousticProfile,
 } from '../types/timegrapher';
-import { globalWatchFingerprinter } from '../services/watchFingerprintEngine';
+import { globalWatchFingerprinter, soundCharacteristics, LOCK_IN_THRESHOLD } from '../services/watchFingerprintEngine';
 import {
   Sparkles,
   CheckCircle2,
@@ -21,25 +21,31 @@ import {
   Trash2,
   X,
   Check,
-  History
+  History,
+  Pencil
 } from 'lucide-react';
 
 interface Props {
   match: FingerprintMatch | null;
   onApplyProfile: (profile: WatchAcousticProfile) => void;
   compact?: boolean;
+  micActive?: boolean;
 }
 
-export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile, compact = false }) => {
+export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile, compact = false, micActive = false }) => {
   const [isNamingModalOpen, setIsNamingModalOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [libraryTab, setLibraryTab] = useState<'profiles' | 'unknowns'>('profiles');
   const [watchName, setWatchName] = useState('');
   const [calibreName, setCalibreName] = useState('');
   const [notes, setNotes] = useState('');
+  const [editProfile, setEditProfile] = useState<WatchAcousticProfile | null>(null);
+  const [liftAngle, setLiftAngle] = useState(52);
 
   const profiles = globalWatchFingerprinter.getProfiles();
   const unknownWatches = globalWatchFingerprinter.getUnknownWatches();
+  // Sound characteristics derived from the 8-band spectral profile
+  const sound = soundCharacteristics(match?.currentSignature?.spectralBands);
 
   const handleOpenNamingModal = () => {
     if (!watchName) {
@@ -50,19 +56,50 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
         setWatchName(match?.temporarySignatureId || 'Custom Mechanical Watch');
       }
     }
+    setEditProfile(null);
+    setIsNamingModalOpen(true);
+  };
+
+  const handleEditProfile = (p: WatchAcousticProfile) => {
+    setEditProfile(p);
+    setWatchName(p.name);
+    setCalibreName(p.movementCalibre || '');
+    setNotes(p.notes || '');
+    setLiftAngle(p.liftAngle);
     setIsNamingModalOpen(true);
   };
 
   const handleSaveWatch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!watchName.trim() || !match) return;
+    if (!watchName.trim()) return;
 
+    if (editProfile) {
+      // Edit path: update the existing profile in place
+      const lift = Math.min(65, Math.max(40, Math.round(liftAngle) || 52));
+      editProfile.name = watchName.trim();
+      editProfile.movementCalibre = calibreName.trim() || editProfile.movementCalibre;
+      editProfile.liftAngle = lift;
+      editProfile.notes = notes.trim() || undefined;
+      globalWatchFingerprinter.saveProfiles();
+      if (match?.matchedProfile?.id === editProfile.id) {
+        onApplyProfile(editProfile);
+      }
+      setEditProfile(null);
+      setIsNamingModalOpen(false);
+      setWatchName('');
+      setCalibreName('');
+      setNotes('');
+      return;
+    }
+
+    // Create path
+    if (!match) return;
     const bph = (match.currentSignature.bph as BphOption) || 21600;
     const newProfile = globalWatchFingerprinter.registerWatchProfile(
       watchName.trim(),
       calibreName.trim() || 'Custom Movement',
       bph,
-      52,
+      liftAngle,
       match.currentSignature,
       notes.trim()
     );
@@ -80,6 +117,10 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
 
   const matched = match?.matchedProfile;
   const isIdentified = match && !match.isUnknown && matched;
+  const liveMatch = match?.liveMatch ?? null;
+  // While the Live Mic is on and the app's live match is below the lock-in
+  // threshold, the app does not detect a watch on the bench.
+  const noWatch = micActive && !!match && (!liveMatch || liveMatch.confidence < LOCK_IN_THRESHOLD);
 
   return (
     <div className="bg-white border border-[#ded5c5] rounded-xl p-2.5 shadow-xs space-y-1.5">
@@ -88,7 +129,11 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
         <div className="flex items-center gap-1.5 min-w-0">
           <Sparkles className="w-3.5 h-3.5 text-[#b45309] shrink-0" />
           <span className="text-[10px] uppercase font-mono text-stone-500 font-semibold tracking-wider">Acoustic ID:</span>
-          {isIdentified ? (
+          {noWatch ? (
+            <span className="text-xs text-stone-800 font-medium truncate font-mono">
+              No watch on the bench
+            </span>
+          ) : isIdentified ? (
             <div className="flex items-center gap-1 truncate">
               <span className="font-bold text-xs text-[#78350f] truncate font-display">
                 {matched.name}
@@ -107,7 +152,7 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          {isIdentified ? (
+          {isIdentified && !noWatch ? (
             <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#fef3c7] text-[#78350f] border border-[#fde68a] flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3 text-[#78350f]" />
               {match.confidencePct}%
@@ -131,18 +176,20 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
         </div>
       </div>
 
-      {/* Line 2: Compact Parameter Bar */}
+      {/* Line 2: Sound Characteristics (computed from the 8-band spectral profile) */}
       {match && (
-        <div className="flex items-center justify-between text-[10px] font-mono text-stone-600 bg-[#faf7f0] px-2 py-1 rounded border border-[#eee5d5]">
+        <div className="flex items-center justify-between text-[10px] font-mono text-stone-600 bg-[#faf7f0] px-2 py-1 rounded border border-[#eee5d5]" title="Lower band share = deeper sound; upper band share = brighter; focus = 1 when the sound sits in a single band">
           <div className="flex items-center gap-2">
-            <span>BPH: <strong className="text-[#78350f]">{match.currentSignature.bph.toLocaleString()}</strong></span>
+            <span>Sound: Depth <strong className="text-stone-800">{(sound.depth * 100).toFixed(0)}%</strong></span>
             <span className="text-stone-300">·</span>
-            <span>Resonance: <strong className="text-stone-800">{match.currentSignature.peakResonanceHz}Hz</strong></span>
+            <span>Brightness <strong className="text-stone-800">{(sound.brightness * 100).toFixed(0)}%</strong></span>
+            <span className="text-stone-300">·</span>
+            <span>Focus {(sound.focus * 100).toFixed(0)}</span>
             <span className="text-stone-300">·</span>
             <span>Δt: <strong className="text-stone-800">{match.currentSignature.deltaTImpulseMs.toFixed(1)}ms</strong></span>
           </div>
 
-          {isIdentified && (
+          {isIdentified && !noWatch && (
             <button
               onClick={() => onApplyProfile(matched)}
               className="text-[10px] text-[#78350f] font-bold underline hover:text-[#5c2b0c] transition ml-1"
@@ -161,11 +208,11 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
               <div className="flex items-center gap-2">
                 <Plus className="w-4 h-4 text-[#78350f]" />
                 <h4 className="font-semibold text-stone-900 font-display text-sm">
-                  Register Acoustic Watch Profile
+                  {editProfile ? 'Edit Acoustic Watch Profile' : 'Register Acoustic Watch Profile'}
                 </h4>
               </div>
               <button
-                onClick={() => setIsNamingModalOpen(false)}
+                onClick={() => { setIsNamingModalOpen(false); setEditProfile(null); }}
                 className="text-stone-400 hover:text-stone-700"
               >
                 <X className="w-4 h-4" />
@@ -174,8 +221,9 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
 
             <form onSubmit={handleSaveWatch} className="p-4 space-y-3">
               <p className="text-xs text-stone-600 font-mono">
-                Give this watch a name (e.g. <em>Eloga Vintage</em>, <em>Seiko NH35</em>).
-                Unruh will save its acoustic resonance and automatically recognize it in future sessions!
+                {editProfile
+                  ? 'Edit the name, movement, notes and lift angle of this watch profile.'
+                  : 'Give this watch a name (e.g. <em>Eloga Vintage</em>, <em>Seiko NH35</em>). Unruh will save its acoustic resonance and automatically recognize it in future sessions!'}
               </p>
 
               <div className="space-y-1">
@@ -216,10 +264,23 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
                 />
               </div>
 
+              <div className="space-y-1">
+                <label className="text-xs font-mono text-stone-700">Lift Angle (°)</label>
+                <input
+                  type="number"
+                  min={40}
+                  max={65}
+                  step={1}
+                  value={liftAngle}
+                  onChange={(e) => setLiftAngle(parseInt(e.target.value, 10) || 52)}
+                  className="w-full bg-[#fdfcf9] border border-[#d6ccbb] rounded px-3 py-1.5 text-xs font-mono text-stone-900 focus:outline-none focus:border-[#78350f]"
+                />
+              </div>
+
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#ded5c5]">
                 <button
                   type="button"
-                  onClick={() => setIsNamingModalOpen(false)}
+                  onClick={() => { setIsNamingModalOpen(false); setEditProfile(null); }}
                   className="px-3 py-1.5 text-xs font-mono text-stone-600 hover:text-stone-900"
                 >
                   Cancel
@@ -228,7 +289,7 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
                   type="submit"
                   className="px-4 py-1.5 text-xs font-mono font-bold bg-[#78350f] text-white hover:bg-[#5c2b0c] rounded shadow-xs"
                 >
-                  Save Profile
+                  {editProfile ? 'Update Profile' : 'Save Profile'}
                 </button>
               </div>
             </form>
@@ -313,6 +374,13 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
                       </div>
 
                       <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleEditProfile(p)}
+                          className="p-1 text-stone-400 hover:text-stone-900 border border-[#ded5c5] hover:border-stone-400 rounded transition"
+                          title="Edit profile (name, movement, notes, lift angle)"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
                         <button
                           onClick={() => {
                             onApplyProfile(p);

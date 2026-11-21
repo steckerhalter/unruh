@@ -86,6 +86,12 @@ export interface AcousticSignature {
   peakResonanceHz: number;
   deltaTImpulseMs: number;
   spectralBands: number[]; // 8-band normalized energy profile
+  /** Finer-grained (16-band) normalized energy profile — better watch differentiation. */
+  fineBands?: number[];
+  /** Energy-weighted mean frequency of the spectrum (Hz) — brighter vs duller watches. */
+  spectralCentroidHz?: number;
+  /** Spread of the spectrum around the centroid (Hz) — narrow vs wide spectra. */
+  spectralSpreadHz?: number;
   tickTockRatio: number;
 }
 
@@ -104,10 +110,16 @@ export interface WatchAcousticProfile {
   userRegistered?: boolean;
 }
 
+export interface LiveMatch {
+  profile: WatchAcousticProfile;
+  confidence: number;
+}
+
 export interface FingerprintMatch {
   matchedProfile: WatchAcousticProfile | null;
   confidencePct: number;
   isUnknown: boolean;
+  liveMatch: LiveMatch | null;
   temporarySignatureId: string;
   currentSignature: AcousticSignature;
 }

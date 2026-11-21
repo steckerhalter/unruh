@@ -5,9 +5,12 @@
  * Condensed in height with controls docked to the right and warm yellow/brown/khaki styling.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { BphOption, COMMON_BPH_PRESETS, SimulatorConfig } from '../types/timegrapher';
-import { Sparkles, Gauge, Target } from 'lucide-react';
+import { Sparkles, Gauge, Target, Clock } from 'lucide-react';
+import { listPublicRecordings, listRecordings, selectRecordingsFolder, stem } from '../services/recordingsLibrary';
+
+export type SourceMode = 'synthesizer' | 'recording';
 
 interface Props {
   config: SimulatorConfig;
@@ -21,6 +24,8 @@ interface Props {
     amplitude: number;
     noise: number;
   }) => void;
+  onPlayRecording?: (name: string) => void;
+  onSourceChange?: (mode: SourceMode) => void;
 }
 
 const SIMULATOR_PRESETS = [
@@ -84,43 +89,106 @@ export const MovementSimulatorPanel: React.FC<Props> = ({
   config,
   onChangeConfig,
   onApplyPreset,
+  onPlayRecording,
+  onSourceChange,
 }) => {
+  const [sourceMode, setSourceMode] = useState<SourceMode>('synthesizer');
+  const [recordings, setRecordings] = useState<string[]>([]);              // picked folder (File System Access)
+  const [selectedRecording, setSelectedRecording] = useState('');
+  const [publicRecordings, setPublicRecordings] = useState<string[]>([]);  // public/recordings via dev server
+  const [recordingFolderMsg, setRecordingFolderMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const pub = await listPublicRecordings();
+        setPublicRecordings(pub);
+      } catch { /* ignore */ }
+      try {
+        const dir = await listRecordings();
+        setRecordings(dir);
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  const handleSelectFolder = async () => {
+    setRecordingFolderMsg(null);
+    try {
+      const names = await selectRecordingsFolder();
+      setRecordings(names);
+      setRecordingFolderMsg(names.length ? `Found ${names.length} recording(s).` : 'No audio files in the folder.');
+    } catch {
+      setRecordingFolderMsg('Folder picking is not supported or was cancelled.');
+    }
+  };
+
+  const handlePlay = (name: string) => {
+    setSelectedRecording(name);
+    if (name) onPlayRecording?.(name);
+  };
+
+  const handleSourceChange = (mode: SourceMode) => {
+    setSourceMode(mode);
+    onSourceChange?.(mode);
+  };
+
+  const mergedRecordings = Array.from(new Set([...publicRecordings, ...recordings])).sort();
+
   return (
     <div className="bg-white border border-[#ded5c5] rounded-xl p-2.5 space-y-2 shadow-xs">
-      {/* 1-Line Header with Controls to the Right */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#eee5d5] pb-1.5">
-        <div className="flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-[#b45309]" />
-          <h3 className="font-semibold text-stone-900 font-display text-xs">
-            VIRTUAL REGULATOR & SYNTHESIZER
-          </h3>
-          <span className="text-stone-300 font-mono text-xs">·</span>
-          <span className="text-stone-500 font-mono text-[10px] hidden sm:inline">
-            Simulate mechanical escapement audio
-          </span>
-        </div>
-
-        {/* Preset Selector Docked to the Right */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-mono text-stone-600">Preset:</span>
-          <select
-            value={config.presetName}
-            onChange={(e) => {
-              const selected = SIMULATOR_PRESETS.find((p) => p.name === e.target.value);
-              if (selected) onApplyPreset(selected);
-            }}
-            className="bg-[#fdfcf9] border border-[#ded5c5] text-stone-800 rounded px-2 py-0.5 text-xs font-mono focus:outline-none focus:border-[#78350f]"
-          >
-            {SIMULATOR_PRESETS.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* 1-Line Header */}
+      <div className="flex items-center gap-1.5 border-b border-[#eee5d5] pb-1.5">
+        <Sparkles className="w-3.5 h-3.5 text-[#b45309]" />
+        <h3 className="font-semibold text-stone-900 font-display text-xs">
+          VIRTUAL REGULATOR & SYNTHESIZER
+        </h3>
+        <span className="text-stone-300 font-mono text-xs">·</span>
+        <span className="text-stone-500 font-mono text-[10px] hidden sm:inline">
+          Simulate mechanical escapement audio
+        </span>
       </div>
 
-      {/* Virtual Regulator Arm - Condensed Horizontal Bar with Snap button docked to the right */}
+      {/* Source Switch: Synthesizer vs Recording */}
+      <div className="flex items-center gap-2 px-1">
+        <span className="text-[10px] font-mono text-stone-500 font-semibold uppercase">Source:</span>
+        {(['synthesizer', 'recording'] as SourceMode[]).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => handleSourceChange(mode)}
+            className={`px-3 py-1 rounded text-[10px] font-mono border transition ${
+              sourceMode === mode
+                ? 'bg-[#78350f] text-white font-bold border-[#78350f]'
+                : 'bg-[#fdfcf9] text-stone-800 border-[#d6ccbb] hover:border-[#78350f]'
+            }`}
+          >
+            {mode === 'synthesizer' ? 'Synthesizer' : 'Recording'}
+          </button>
+        ))}
+      </div>
+
+      {/* Synthesizer mode: generated simulator signals */}
+      {sourceMode === 'synthesizer' && (
+        <>
+          {/* Preset Selector (only active when the synthesizer is selected) */}
+          <div className="flex items-center gap-1.5 px-1">
+            <span className="text-[10px] font-mono text-stone-600">Preset:</span>
+            <select
+              value={config.presetName}
+              onChange={(e) => {
+                const selected = SIMULATOR_PRESETS.find((p) => p.name === e.target.value);
+                if (selected) onApplyPreset(selected);
+              }}
+              className="bg-[#fdfcf9] border border-[#ded5c5] text-stone-800 rounded px-2 py-0.5 text-xs font-mono focus:outline-none focus:border-[#78350f]"
+            >
+              {SIMULATOR_PRESETS.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Virtual Regulator Arm - Condensed Horizontal Bar with Snap button docked to the right */}
       <div className="p-2 bg-[#faf7f0] border border-[#d6a95e]/50 rounded-lg flex flex-col sm:flex-row items-center gap-3">
         <div className="flex items-center gap-1.5 shrink-0">
           <Gauge className="w-3.5 h-3.5 text-[#b45309]" />
@@ -237,6 +305,48 @@ export const MovementSimulatorPanel: React.FC<Props> = ({
           </select>
         </div>
       </div>
+        </>
+      )}
+
+      {/* Recording mode: waveform loader (public recordings + picked folder) */}
+      {sourceMode === 'recording' && (
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          <span className="flex items-center gap-1.5 text-[10px] font-mono text-stone-500">
+            <Clock className="w-3 h-3 text-[#b45309]" />
+            <span className="font-semibold uppercase">Recording:</span>
+          </span>
+          <button
+            onClick={handleSelectFolder}
+            className="px-2 py-0.5 bg-[#fef3c7] border border-[#fde68a] text-[#78350f] font-bold rounded text-[10px] font-mono transition hover:bg-[#fde68a]"
+          >
+            Select recordings folder
+          </button>
+          <select
+            value={selectedRecording}
+            onChange={(e) => handlePlay(e.target.value)}
+            className="bg-[#fdfcf9] border border-[#d6ccbb] text-stone-900 rounded px-2 py-0.5 text-[10px] font-mono focus:outline-none focus:border-[#78350f] min-w-[150px]"
+          >
+            {mergedRecordings.length === 0 ? (
+              <option value="">No recordings found</option>
+            ) : (
+              <>
+                <option value="">Select a watch…</option>
+                {mergedRecordings.map((name) => (
+                  <option key={name} value={name}>
+                    {stem(name)}
+                  </option>
+                ))}
+              </>
+            )}
+          </select>
+          {selectedRecording && (
+            <span className="text-[10px] font-mono text-stone-400">Playing: {selectedRecording}</span>
+          )}
+          {recordingFolderMsg && (
+            <span className="text-[10px] font-mono text-stone-500">{recordingFolderMsg}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

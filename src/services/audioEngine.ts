@@ -33,6 +33,12 @@ export class AudioEngine {
   // Simulator oscillator / nodes
   private simIntervalId: number | null = null;
   private simTargetNode: GainNode | null = null;
+  private recordingSource: AudioBufferSourceNode | null = null;
+  /** Ring buffer of recent input waveform samples (chronological, newest last). */
+  private waveformRing = new Float32Array(48000);
+  private waveformRingHead = 0;
+  private waveformRingSize = 0;
+  private recordingStartTime = 0;
 
   private isRunning: boolean = false;
   private isSimulating: boolean = false;
@@ -399,6 +405,7 @@ export class AudioEngine {
   private processAudioBuffer(event: AudioProcessingEvent) {
     const inputBuffer = event.inputBuffer.getChannelData(0);
     const sampleRate = event.inputBuffer.sampleRate;
+    this.pushWaveform(inputBuffer);
     const len = inputBuffer.length;
 
     let sumSquares = 0;
@@ -768,6 +775,7 @@ export class AudioEngine {
   public stop() {
     this.isRunning = false;
     this.isSimulating = false;
+    this.stopRecording();
 
     if (this.simIntervalId !== null) {
       clearTimeout(this.simIntervalId);
@@ -818,6 +826,59 @@ export class AudioEngine {
     this.previousHalfPeriodMs = 0;
   }
 
+  /** Stop the generated simulator beat pulses (used when a recording plays instead). */
+  public stopSimulationPulses(): void {
+    if (this.simIntervalId !== null) {
+      clearTimeout(this.simIntervalId);
+      this.simIntervalId = null;
+    }
+  }
+
+  /** Stop the playing recording. */
+  public stopRecording(): void {
+    if (this.recordingSource) {
+      try { this.recordingSource.stop(); } catch { /* ignore */ }
+      try { this.recordingSource.disconnect(); } catch { /* ignore */ }
+      this.recordingSource = null;
+    }
+  }
+
+  /**
+   * Play a recording from the recordings folder through the app's analysis
+   * pipeline — the same path used by Live Mic — and stop the generated
+   * simulator pulses. The recording loops so the watch keeps "ticking".
+   */
+  public async startRecording(buffer: ArrayBuffer): Promise<boolean> {
+    if (!this.audioCtx || !this.gainNode) return false;
+    this.stopSimulationPulses();
+    // If Live Mic is active, stop the mic input but keep the audio graph alive.
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach((track) => track.stop());
+      this.mediaStream = null;
+      if (this.sourceNode) {
+        this.sourceNode.disconnect();
+        this.sourceNode = null;
+      }
+    }
+    try {
+      const decoded = await this.audioCtx.decodeAudioData(buffer);
+      const source = this.audioCtx.createBufferSource();
+      source.buffer = decoded;
+      source.loop = true;
+      source.connect(this.gainNode);
+      this.recordingSource = source;
+      this.recordingStartTime = this.audioCtx.currentTime;
+      this.streamStartTime = this.audioCtx.currentTime;
+      source.start(0);
+      this.isRunning = true;
+      this.isSimulating = true;
+      return true;
+    } catch (e) {
+      console.error('Failed to play recording:', e);
+      return false;
+    }
+  }
+
   // --- Public Getters required by App.tsx ---
   public getIsRunning(): boolean {
     return this.isRunning;
@@ -829,5 +890,42 @@ export class AudioEngine {
 
   public getAdaptiveThreshold(): number {
     return this.adaptiveThreshold;
+  }
+
+  /**
+   * Recent input waveform samples (chronological, newest last) — used by the
+   * WaveformViewer to draw the live audio waveform.
+   */
+  public getWaveform(): Float32Array {
+    const n = this.waveformRingSize;
+    if (n === 0) return new Float32Array(0);
+    const out = new Float32Array(n);
+    const size = this.waveformRing.length;
+    const start = ((this.waveformRingHead - n) % size + size) % size;
+    for (let i = 0; i < n; i++) {
+      out[i] = this.waveformRing[(start + i) % size];
+    }
+    return out;
+  }
+
+  /** Progress of the playing recording (null when no recording is playing). */
+  public getRecordingProgress(): { elapsedSec: number; totalSec: number; playing: boolean } | null {
+    if (!this.recordingSource) return null;
+    const buffer = this.recordingSource.buffer;
+    if (!buffer) return { elapsedSec: 0, totalSec: 0, playing: false };
+    const total = Math.max(0.05, buffer.duration);
+    const pos = this.audioCtx ? Math.max(0, this.audioCtx.currentTime - this.recordingStartTime) : 0;
+    const elapsed = total > 0 ? pos % total : pos;
+    return { elapsedSec: elapsed, totalSec: total, playing: true };
+  }
+
+  /** Push samples into the waveform ring (chronological order). */
+  private pushWaveform(chunk: Float32Array): void {
+    const size = this.waveformRing.length;
+    for (let i = 0; i < chunk.length; i++) {
+      this.waveformRing[this.waveformRingHead] = chunk[i];
+      this.waveformRingHead = (this.waveformRingHead + 1) % size;
+      this.waveformRingSize = Math.min(size, this.waveformRingSize + 1);
+    }
   }
 }

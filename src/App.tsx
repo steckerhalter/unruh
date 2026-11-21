@@ -26,9 +26,11 @@ import {
 } from './config/defaults.ts'
 import { AudioEngine } from './services/audioEngine';
 import { globalWatchFingerprinter } from './services/watchFingerprintEngine';
+import { playRecording } from './services/recordingsLibrary';
 import { OscilloscopeRateTrend } from './components/OscilloscopeRateTrend';
 import { EscapementOscilloscope } from './components/EscapementOscilloscope';
 import { MovementSimulatorPanel } from './components/MovementSimulatorPanel';
+import { WaveformViewer } from './components/WaveformViewer';
 import { PositionTester } from './components/PositionTester';
 import { WatchIdentificationCard } from './components/WatchIdentificationCard';
 import { AudioSettingsModal } from './components/AudioSettingsModal';
@@ -87,6 +89,7 @@ export default function App() {
   useEffect(() => {
     const engine = new AudioEngine();
     engineRef.current = engine;
+    (window as unknown as Record<string, unknown>).__globalAudioEngine = engine;
 
     engine.onBeat = (beat) => {
       setLatestBeat(beat);
@@ -253,6 +256,33 @@ export default function App() {
       );
       setIsRunning(true);
       setIsSimulating(true);
+    }
+  };
+
+  const handlePlayRecording = async (name: string) => {
+    if (!engineRef.current) return;
+    await playRecording(engineRef.current, name);
+  };
+
+  const handleSourceChange = (mode: 'synthesizer' | 'recording') => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (mode === 'synthesizer') {
+      // Switching to the synthesizer: stop any playing recording and restart
+      // the generated simulator pulses.
+      engine.stopRecording();
+      if (isRunning) {
+        engine.startSimulation(
+          simConfig.bph,
+          simConfig.rateError,
+          simConfig.beatError,
+          simConfig.amplitude,
+          simConfig.noiseLevel
+        );
+      }
+    } else {
+      // Recording mode: the user picks a recording in the panel.
+      engine.stopSimulationPulses();
     }
   };
 
@@ -515,12 +545,17 @@ export default function App() {
                 isInitializing={isInitializing}
               />
 
+              {/* Live audio waveform + source label (Live Mic / Simulated Pulses / Recording) */}
+              <WaveformViewer engineRef={engineRef} />
+
               {/* Movement Simulator Panel (condensed in height, controls docked right) */}
               {isSimulating && (
                 <MovementSimulatorPanel
                   config={simConfig}
                   onChangeConfig={handleSimConfigChange}
                   onApplyPreset={handleApplySimPreset}
+                  onPlayRecording={handlePlayRecording}
+                  onSourceChange={handleSourceChange}
                 />
               )}
             </div>
@@ -532,6 +567,7 @@ export default function App() {
                 match={fingerprintMatch}
                 onApplyProfile={handleApplyProfile}
                 compact={true}
+                micActive={isRunning && !isSimulating}
               />
 
               {/* 2. Primary Telemetry Metric Cards (Condensed Heights & Side-by-Side Grid) */}
@@ -784,7 +820,11 @@ export default function App() {
             )}
 
             {activeTab === 'fingerprints' && (
-              <WatchIdentificationCard match={fingerprintMatch} onApplyProfile={handleApplyProfile} />
+              <WatchIdentificationCard
+                match={fingerprintMatch}
+                onApplyProfile={handleApplyProfile}
+                micActive={isRunning && !isSimulating}
+              />
             )}
           </div>
         )}

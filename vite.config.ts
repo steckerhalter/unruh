@@ -1,8 +1,39 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import {readdirSync, statSync} from 'node:fs';
+import type {ServerResponse} from 'node:http';
+import {defineConfig, type Connect, type ViteDevServer} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
+
+/**
+ * Dev-server plugin that lists the files in the public `recordings` folder as
+ * JSON — lets the app populate its recordings list without filesystem
+ * permissions (GET /unruh/recordings/ → ["file.ogg", ...]).
+ */
+const unruhRecordingsListingPlugin = {
+  name: 'unruh-recordings-listing',
+  configureServer(server: ViteDevServer) {
+    server.middlewares.use((req: Connect.IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
+      try {
+        const url = new URL(req.url || '/', 'http://localhost');
+        if (url.pathname === '/unruh/recordings/' || url.pathname === '/recordings/') {
+          const dir = path.join(__dirname, 'public', 'recordings');
+          const names = readdirSync(dir)
+            .filter((name) => statSync(path.join(dir, name)).isFile())
+            .filter((name) => /\.(ogg|wav|mp3|m4a|aac|flac|aiff|aif|wma)$/i.test(name))
+            .sort();
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(names));
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+      next();
+    });
+  },
+};
 
 export default defineConfig(() => {
   return {
@@ -10,6 +41,7 @@ export default defineConfig(() => {
     plugins: [
       react(),
       tailwindcss(),
+      unruhRecordingsListingPlugin,
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'icon.svg', 'apple-touch-icon.png'],

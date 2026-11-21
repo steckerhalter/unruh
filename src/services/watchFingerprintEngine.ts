@@ -16,6 +16,12 @@ import {
 const STORAGE_KEY = 'chronoscope_watch_profiles_v2';
 const UNKNOWN_STORAGE_KEY = 'chronoscope_unknown_watches_v2';
 
+/**
+ * Confidence below which the app does not consider any watch to be on the
+ * bench: while the Live Mic is on, the panel reports "No watch on the bench".
+ */
+export const LOCK_IN_THRESHOLD = 68;
+
 export interface UnknownWatchRecord {
   id: string;
   label: string;
@@ -28,81 +34,32 @@ export interface UnknownWatchRecord {
   signature: AcousticSignature;
 }
 
-// Seeded profiles including Eloga vintage watch requested by user
-const INITIAL_PROFILES: WatchAcousticProfile[] = [
-  {
-    id: 'profile_eloga_vintage',
-    name: 'Eloga Vintage (Swiss Lever)',
-    movementCalibre: 'Felsa / AS 1130 Calibre',
-    bph: 18000,
-    liftAngle: 50,
-    targetRate: 0.0,
-    signature: {
-      bph: 18000,
-      peakResonanceHz: 4500,
-      deltaTImpulseMs: 6.5,
-      spectralBands: [0.15, 0.28, 0.48, 0.85, 0.92, 0.65, 0.35, 0.18],
-      tickTockRatio: 1.0,
-    },
-    dateCreated: Date.now() - 86400000 * 10,
-    timesRecognized: 4,
-    notes: 'Classic vintage Eloga mechanical watch with 18,000 bph balance wheel and Swiss lever escapement.',
-  },
-  {
-    id: 'profile_seiko_nh35',
-    name: 'Seiko NH35 / 4R36',
-    movementCalibre: 'Seiko Instruments NH35A',
-    bph: 21600,
-    liftAngle: 53,
-    targetRate: 0.0,
-    signature: {
-      bph: 21600,
-      peakResonanceHz: 4800,
-      deltaTImpulseMs: 6.2,
-      spectralBands: [0.08, 0.18, 0.40, 0.90, 0.88, 0.58, 0.28, 0.12],
-      tickTockRatio: 1.0,
-    },
-    dateCreated: Date.now() - 86400000 * 8,
-    timesRecognized: 8,
-    notes: 'Modern 3 Hz robust Japanese workhorse with Diashock balance.',
-  },
-  {
-    id: 'profile_eta_2824',
-    name: 'ETA 2824-2 / Sellita SW200',
-    movementCalibre: 'ETA 2824-2',
-    bph: 28800,
-    liftAngle: 50,
-    targetRate: 0.0,
-    signature: {
-      bph: 28800,
-      peakResonanceHz: 5100,
-      deltaTImpulseMs: 5.4,
-      spectralBands: [0.05, 0.15, 0.32, 0.78, 0.98, 0.72, 0.42, 0.21],
-      tickTockRatio: 1.0,
-    },
-    dateCreated: Date.now() - 86400000 * 5,
-    timesRecognized: 12,
-    notes: 'High-beat 4 Hz Swiss workhorse with Novodiac / Incabloc shock protection.',
-  },
-  {
-    id: 'profile_vintage_pocket',
-    name: 'Vintage Pocket Watch (18,000 bph)',
-    movementCalibre: 'Unitas 6497 / Waltham',
-    bph: 18000,
-    liftAngle: 44,
-    targetRate: 0.0,
-    signature: {
-      bph: 18000,
-      peakResonanceHz: 3600,
-      deltaTImpulseMs: 8.2,
-      spectralBands: [0.25, 0.45, 0.72, 0.90, 0.70, 0.45, 0.20, 0.08],
-      tickTockRatio: 1.0,
-    },
-    dateCreated: Date.now() - 86400000 * 3,
-    timesRecognized: 2,
-    notes: 'Large diameter pocket watch balance with heavy screw rim and slow deep acoustic strike.',
-  },
-];
+/**
+ * Sound characteristics of a signature, computed from the 8-band spectral
+ * profile so the panel can describe a watch by the character of its sound
+ * (depth, brightness, focus) instead of raw numbers.
+ *
+ * - Depth: share of the sound's energy in the lower 4 of the 8 bands
+ *   (deeper watch -> higher).
+ * - Brightness: share of the energy in the upper 4 bands.
+ * - Focus: how concentrated the sound is (1 = one dominant band, 0 = spread out),
+ *   from the Shannon entropy of the normalized band distribution.
+ */
+export function soundCharacteristics(bands: number[] | undefined): { depth: number; brightness: number; focus: number } {
+  const arr = (bands || []).slice(0, 8).map((b) => Math.max(0, b || 0));
+  const sum = arr.reduce((a, b) => a + b, 0) || 1;
+  const p = arr.map((b) => b / sum);
+  const depth = (p[0] + p[1] + p[2] + p[3]) / 4;
+  const brightness = (p[4] + p[5] + p[6] + p[7]) / 4;
+  let entropy = 0;
+  for (const pi of p) {
+    if (pi > 0) entropy -= pi * Math.log2(pi);
+  }
+  const focus = Math.max(0, Math.min(1, 1 - entropy / Math.log2(8)));
+  return { depth, brightness, focus };
+}
+
+const FINE_BANDS = 16;
 
 export class WatchFingerprintEngine {
   private profiles: WatchAcousticProfile[] = [];
@@ -126,6 +83,13 @@ export class WatchFingerprintEngine {
   private candidateStreak: number = 0;
   private dropoutStreak: number = 0;
 
+  /** Rolling average of the fine bands. */
+  private runningFineBands: number[] = new Array(FINE_BANDS).fill(0.1);
+  /** Rolling average of the spectral centroid (Hz). */
+  private runningCentroid = 4500;
+  /** Rolling average of the spectral spread (Hz). */
+  private runningSpread = 0;
+
   constructor() {
     this.loadProfiles();
     this.loadUnknownWatches();
@@ -135,14 +99,32 @@ export class WatchFingerprintEngine {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        this.profiles = JSON.parse(stored);
+        this.profiles = JSON.parse(stored).map((p: WatchAcousticProfile) => this.migrateProfile(p));
       } else {
-        this.profiles = INITIAL_PROFILES;
-        this.saveProfiles();
+        // No background profiles: the app only knows watches the user
+        // names via "Name Watch".
+        this.profiles = [];
       }
     } catch {
-      this.profiles = INITIAL_PROFILES;
+      this.profiles = [];
     }
+  }
+
+  /**
+   * Synthesize the finer-grained spectral fields (fineBands, centroid, spread)
+   * for profiles registered before they existed: their old 8-band coarse
+   * profile is doubled into a 16-band fine profile.
+   */
+  private migrateProfile(p: WatchAcousticProfile): WatchAcousticProfile {
+    if (!p.signature.fineBands && Array.isArray(p.signature.spectralBands) && p.signature.spectralBands.length === 8) {
+      const fineBands: number[] = new Array(FINE_BANDS).fill(0);
+      for (let b = 0; b < 8; b++) {
+        fineBands[2 * b] = p.signature.spectralBands[b];
+        fineBands[2 * b + 1] = p.signature.spectralBands[b];
+      }
+      p.signature.fineBands = fineBands;
+    }
+    return p;
   }
 
   public saveProfiles() {
@@ -154,17 +136,14 @@ export class WatchFingerprintEngine {
   }
 
   private loadUnknownWatches() {
+    // Disabled by user request: the app must not create records in the
+    // background — the "Graphed Unknowns" store is empty unless the user
+    // names watches ("Name Watch"). Clear any stored records on load.
+    this.unknownWatches.clear();
     try {
-      const stored = localStorage.getItem(UNKNOWN_STORAGE_KEY);
-      if (stored) {
-        const arr: UnknownWatchRecord[] = JSON.parse(stored);
-        this.unknownWatches.clear();
-        for (const item of arr) {
-          this.unknownWatches.set(item.id, item);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load unknown watches:', e);
+      localStorage.removeItem(UNKNOWN_STORAGE_KEY);
+    } catch {
+      /* ignore */
     }
   }
 
@@ -198,6 +177,9 @@ export class WatchFingerprintEngine {
   ): AcousticSignature {
     let rawResonance = 4500;
     const rawBands: number[] = [0.1, 0.2, 0.4, 0.8, 0.9, 0.6, 0.3, 0.1];
+    const rawFineBands: number[] = new Array(FINE_BANDS).fill(0.1);
+    let rawCentroid = 4500;
+    let rawSpread = 0;
 
     if (frequencyData && frequencyData.length >= 64) {
       const totalBins = frequencyData.length;
@@ -224,6 +206,35 @@ export class WatchFingerprintEngine {
         }
         rawBands[b] = Math.min(1.0, (sum / (end - start)) / 255);
       }
+
+      // 16 fine bands (finer-grained energy profile — better watch differentiation)
+      const fineSize = Math.floor(totalBins / FINE_BANDS);
+      for (let b = 0; b < FINE_BANDS; b++) {
+        let sum = 0;
+        const start = b * fineSize;
+        const end = Math.min(totalBins, start + fineSize);
+        for (let j = start; j < end; j++) {
+          sum += frequencyData[j];
+        }
+        rawFineBands[b] = Math.min(1.0, (sum / Math.max(1, end - start)) / 255);
+      }
+
+      // Spectral centroid + spread from the full FFT (energy-weighted)
+      let centroidSum = 0;
+      let centroidSqSum = 0;
+      let energySum = 0;
+      for (let i = 0; i < totalBins; i++) {
+        const v = frequencyData[i];
+        if (v <= 0) continue;
+        const f = i * binWidthHz;
+        centroidSum += v * f;
+        centroidSqSum += v * f * f;
+        energySum += v;
+      }
+      if (energySum > 0) {
+        rawCentroid = centroidSum / energySum;
+        rawSpread = Math.sqrt(Math.max(0, centroidSqSum / energySum - rawCentroid * rawCentroid));
+      }
     }
 
     const rawDeltaT = Math.max(3.5, Math.min(12, deltaTMs || 6.5));
@@ -234,6 +245,9 @@ export class WatchFingerprintEngine {
       this.runningResonance = rawResonance;
       this.runningDeltaT = rawDeltaT;
       this.runningBands = [...rawBands];
+      this.runningFineBands = [...rawFineBands];
+      this.runningCentroid = Math.round(rawCentroid);
+      this.runningSpread = Math.round(rawSpread);
     } else {
       this.runningBph = bph;
       this.runningResonance = Math.round(this.runningResonance * 0.75 + rawResonance * 0.25);
@@ -241,6 +255,11 @@ export class WatchFingerprintEngine {
       for (let k = 0; k < 8; k++) {
         this.runningBands[k] = this.runningBands[k] * 0.8 + rawBands[k] * 0.2;
       }
+      for (let k = 0; k < FINE_BANDS; k++) {
+        this.runningFineBands[k] = this.runningFineBands[k] * 0.8 + rawFineBands[k] * 0.2;
+      }
+      this.runningCentroid = Math.round(this.runningCentroid * 0.75 + rawCentroid * 0.25);
+      this.runningSpread = Math.round(this.runningSpread * 0.75 + rawSpread * 0.25);
     }
     this.samplesProcessed++;
 
@@ -249,6 +268,9 @@ export class WatchFingerprintEngine {
       peakResonanceHz: this.runningResonance,
       deltaTImpulseMs: this.runningDeltaT,
       spectralBands: [...this.runningBands],
+      fineBands: [...this.runningFineBands],
+      spectralCentroidHz: this.runningCentroid,
+      spectralSpreadHz: this.runningSpread,
       tickTockRatio: 1.0,
     };
   }
@@ -294,11 +316,39 @@ export class WatchFingerprintEngine {
       }
       const spectralScore = dotProd / (Math.sqrt(magA) * Math.sqrt(magB) || 1);
 
-      // Total weighted confidence (0 - 100)
-      const baseConfidence = (bphScore * 0.45 + deltaTScore * 0.25 + resScore * 0.15 + spectralScore * 0.15) * 100;
-      // User-named watches (registered profiles) get a small boost so they outrank
-      // similarly-scoring seeded profiles when the watch is on the bench.
-      const confidence = profile.userRegistered ? baseConfidence + 10 : baseConfidence;
+      // 5. Fine Band Cosine Similarity (16 bands) — the finer-grained sound
+      // profile differentiates similar watches. Falls back to the 8-band score
+      // when either side lacks fine bands.
+      let fineScore = spectralScore;
+      if (sig.fineBands && pSig.fineBands && sig.fineBands.length === FINE_BANDS && pSig.fineBands.length === FINE_BANDS) {
+        let dotF = 0, magAF = 0, magBF = 0;
+        for (let k = 0; k < FINE_BANDS; k++) {
+          const a = sig.fineBands[k] || 0.1;
+          const b = pSig.fineBands[k] || 0.1;
+          dotF += a * b;
+          magAF += a * a;
+          magBF += b * b;
+        }
+        fineScore = dotF / (Math.sqrt(magAF) * Math.sqrt(magBF) || 1);
+      }
+
+      // 6. Spectral centroid difference — brighter vs duller watches
+      let centroidScore = 1;
+      if (typeof sig.spectralCentroidHz === 'number' && typeof pSig.spectralCentroidHz === 'number') {
+        const centroidDiff = Math.abs(sig.spectralCentroidHz - pSig.spectralCentroidHz);
+        centroidScore = Math.max(0, 1 - centroidDiff / 3000);
+      }
+
+      // 7. Spectral spread difference — narrow vs wide spectra
+      let spreadScore = 1;
+      if (typeof sig.spectralSpreadHz === 'number' && typeof pSig.spectralSpreadHz === 'number') {
+        const spreadDiff = Math.abs(sig.spectralSpreadHz - pSig.spectralSpreadHz);
+        spreadScore = Math.max(0, 1 - spreadDiff / 4000);
+      }
+
+      // Total weighted confidence (0 - 100). The spectral bands — the watch's
+      // actual sound — dominate; the fine bands + centroid + spread add resolution.
+      const confidence = (bphScore * 0.22 + deltaTScore * 0.09 + resScore * 0.09 + spectralScore * 0.12 + fineScore * 0.28 + centroidScore * 0.10 + spreadScore * 0.10) * 100;
 
       if (confidence > topConfidence) {
         topConfidence = confidence;
@@ -306,7 +356,6 @@ export class WatchFingerprintEngine {
       }
     }
 
-    const LOCK_IN_THRESHOLD = 68;   // Threshold to declare identification
     const DROPOUT_THRESHOLD = 48;   // Threshold below which identification is lost
     const LOCK_IN_STREAK = 3;       // 3 consecutive beats required to lock
     const DROPOUT_STREAK = 12;      // 12 consecutive dropped beats required to unlock (~3 sec)
@@ -323,14 +372,47 @@ export class WatchFingerprintEngine {
         const bphScore = sig.bph === pSig.bph ? 1.0 : Math.max(0, 1 - Math.abs(sig.bph - pSig.bph) / 3600);
         const deltaTScore = Math.max(0, 1 - Math.abs(sig.deltaTImpulseMs - pSig.deltaTImpulseMs) / 3.2);
         const resScore = Math.max(0, 1 - Math.abs(sig.peakResonanceHz - pSig.peakResonanceHz) / 2200);
-        lockedProfileScore = (bphScore * 0.45 + deltaTScore * 0.25 + resScore * 0.3) * 100;
+        // Spectral (sound) score of the locked profile vs the live signature
+        let specDot = 0, specMagA = 0, specMagB = 0;
+        for (let k = 0; k < 8; k++) {
+          const a = sig.spectralBands[k] || 0.1;
+          const b = pSig.spectralBands[k] || 0.1;
+          specDot += a * b;
+          specMagA += a * a;
+          specMagB += b * b;
+        }
+        const lockedSpecScore = specDot / (Math.sqrt(specMagA) * Math.sqrt(specMagB) || 1);
+        // Fine bands + centroid (same resolution as the main match)
+        let lockedFineScore = lockedSpecScore;
+        if (sig.fineBands && pSig.fineBands && sig.fineBands.length === FINE_BANDS && pSig.fineBands.length === FINE_BANDS) {
+          let dotF = 0, magAF = 0, magBF = 0;
+          for (let k = 0; k < FINE_BANDS; k++) {
+            const a = sig.fineBands[k] || 0.1;
+            const b = pSig.fineBands[k] || 0.1;
+            dotF += a * b;
+            magAF += a * a;
+            magBF += b * b;
+          }
+          lockedFineScore = dotF / (Math.sqrt(magAF) * Math.sqrt(magBF) || 1);
+        }
+        let lockedCentroidScore = 1;
+        if (typeof sig.spectralCentroidHz === 'number' && typeof pSig.spectralCentroidHz === 'number') {
+          const centroidDiff = Math.abs(sig.spectralCentroidHz - pSig.spectralCentroidHz);
+          lockedCentroidScore = Math.max(0, 1 - centroidDiff / 3000);
+        }
+        let lockedSpreadScore = 1;
+        if (typeof sig.spectralSpreadHz === 'number' && typeof pSig.spectralSpreadHz === 'number') {
+          const spreadDiff = Math.abs(sig.spectralSpreadHz - pSig.spectralSpreadHz);
+          lockedSpreadScore = Math.max(0, 1 - spreadDiff / 4000);
+        }
+        lockedProfileScore = (bphScore * 0.22 + deltaTScore * 0.09 + resScore * 0.09 + lockedSpecScore * 0.12 + lockedFineScore * 0.28 + lockedCentroidScore * 0.10 + lockedSpreadScore * 0.10) * 100;
       }
 
       // Check if a different profile is overwhelmingly matching (> 80% for multiple evaluations)
       if (topProfile && topProfile.id !== this.lockedProfile.id && topConfidence >= 80) {
-        // A user-named watch holds its lock while the top profile isn't clearly better
-        const holdUserLock =
-          this.lockedProfile.userRegistered === true && topConfidence <= this.lockedConfidence + 10;
+        // A user-named watch holds its lock: the app doesn't switch away from a
+        // named watch on its own — the user deletes the profile to release it.
+        const holdUserLock = this.lockedProfile.userRegistered === true;
         if (!holdUserLock) {
           if (this.candidateProfile?.id === topProfile.id) {
             this.candidateStreak++;
@@ -348,8 +430,10 @@ export class WatchFingerprintEngine {
         }
       } else if (lockedProfileScore < DROPOUT_THRESHOLD) {
         this.dropoutStreak++;
-        if (this.dropoutStreak >= DROPOUT_STREAK) {
-          // Sustained loss of signal -> release lock back to unknown
+        if (this.dropoutStreak >= DROPOUT_STREAK && this.lockedProfile.userRegistered !== true) {
+          // Sustained loss of signal -> release lock back to unknown.
+          // User-named watches are not released on dropout — the user
+          // deletes the profile in the Library instead.
           this.lockedProfile = null;
           this.lockedConfidence = 0;
           this.dropoutStreak = 0;
@@ -383,51 +467,19 @@ export class WatchFingerprintEngine {
 
     const isRecognized = this.lockedProfile !== null;
 
-    // Unknown Sound Profile Tracking (Persistent across sessions as requested by user)
-    // Quantize signature into identifiable profile bucket: BPH + Resonance (~300Hz bucket) + Delta-T (~0.5ms bucket)
-    const roundedRes = Math.round(sig.peakResonanceHz / 300) * 300;
-    const roundedDeltaT = Math.round(sig.deltaTImpulseMs * 2) / 2;
-    const unknownKey = `UNREG_${sig.bph}_${roundedRes}Hz_${roundedDeltaT}ms`;
-
-    let unknownRecord = this.unknownWatches.get(unknownKey);
-    if (!unknownRecord) {
-      // Check if another unknown record has the same BPH and close resonance (< 400Hz)
-      for (const [id, rec] of this.unknownWatches.entries()) {
-        if (rec.bph === sig.bph && Math.abs(rec.peakResonanceHz - sig.peakResonanceHz) < 450) {
-          unknownRecord = rec;
-          break;
-        }
-      }
-    }
-
-    if (!unknownRecord) {
-      const index = this.unknownWatches.size + 1;
-      unknownRecord = {
-        id: unknownKey,
-        label: `Unknown Watch #${index} (${sig.bph.toLocaleString()} bph · ${roundedRes} Hz)`,
-        bph: sig.bph,
-        peakResonanceHz: roundedRes,
-        deltaTImpulseMs: roundedDeltaT,
-        firstSeen: Date.now(),
-        lastSeen: Date.now(),
-        totalBeats: 1,
-        signature: sig,
-      };
-      this.unknownWatches.set(unknownKey, unknownRecord);
-      this.saveUnknownWatches();
-    } else {
-      unknownRecord.lastSeen = Date.now();
-      unknownRecord.totalBeats++;
-      if (unknownRecord.totalBeats % 50 === 0) {
-        this.saveUnknownWatches();
-      }
-    }
+    // Unknown-watch recording is disabled by user request: the app must not
+    // create anything in the background — profiles are only created when the
+    // user names a watch ("Name Watch").
+    const temporarySignatureId = isRecognized
+      ? ''
+      : 'Watch on the bench — use "+ Name Watch" to name it';
 
     return {
       matchedProfile: isRecognized ? this.lockedProfile : null,
       confidencePct: isRecognized ? this.lockedConfidence : Math.round(topConfidence),
       isUnknown: !isRecognized,
-      temporarySignatureId: unknownRecord.label,
+      liveMatch: topProfile ? { profile: topProfile, confidence: topConfidence } : null,
+      temporarySignatureId,
       currentSignature: sig,
     };
   }

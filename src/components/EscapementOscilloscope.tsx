@@ -120,12 +120,19 @@ export const EscapementOscilloscope: React.FC<Props> = ({ latestBeat, liftAngle 
       ctx.lineTo(t1X, height - padB);
       ctx.stroke();
 
-      // t2: Impulse (Golden Amber)
-      ctx.strokeStyle = '#d97706';
-      ctx.beginPath();
-      ctx.moveTo(t2X, padT);
-      ctx.lineTo(t2X, height - padB);
-      ctx.stroke();
+      // t2 often lands on t1 (impulse merged with the unlock). When the
+      // markers are too close, drawing both lines makes t1 look amber and
+      // the labels overlap, so suppress the t2 marker entirely.
+      const t2TooClose =
+        Math.abs(t2X - t1X) < 70 || Math.abs(t2X - t3X) < 70;
+      if (!t2TooClose) {
+        // t2: Impulse (Golden Amber)
+        ctx.strokeStyle = '#d97706';
+        ctx.beginPath();
+        ctx.moveTo(t2X, padT);
+        ctx.lineTo(t2X, height - padB);
+        ctx.stroke();
+      }
 
       // t3: Drop / Banking (Emerald Green)
       ctx.strokeStyle = '#059669';
@@ -152,18 +159,21 @@ export const EscapementOscilloscope: React.FC<Props> = ({ latestBeat, liftAngle 
       ctx.fillStyle = '#5c2b0c';
       ctx.font = '600 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(`Δt = ${activeBeat.deltaTImpulseMs.toFixed(2)} ms`, (t1X + t3X) / 2, bracketY - 5);
+      ctx.fillText(`Δt ≈ ${activeBeat.deltaTImpulseMs.toFixed(2)} ms`, (t1X + t3X) / 2, bracketY - 5);
 
       // Marker labels
       ctx.font = '10px "JetBrains Mono", monospace';
       ctx.fillStyle = '#78350f';
       ctx.fillText('t1: Unlock', t1X, height - padB + 13);
 
-      ctx.fillStyle = '#d97706';
-      ctx.fillText('t2: Impulse', t2X, height - padB + 13);
+      // The t2 marker/label is suppressed when it would collide with t1 or t3.
+      if (!t2TooClose) {
+        ctx.fillStyle = '#d97706';
+        ctx.fillText('t2: Impulse', t2X, height - padB + 13);
+      }
 
       ctx.fillStyle = '#059669';
-      ctx.fillText('t3: Banking', t3X, height - padB + 13);
+      ctx.fillText('t3: Banking (est.)', t3X, height - padB + 13);
     } else {
       ctx.fillStyle = '#8c7e6b';
       ctx.font = '11px "JetBrains Mono", monospace';

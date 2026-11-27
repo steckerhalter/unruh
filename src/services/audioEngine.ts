@@ -87,6 +87,9 @@ export class AudioEngine {
   private readonly RATE_WINDOW_BEATS = 48;
   // Beat error is a tick-vs-tock comparison, so it only needs a few beats.
   private readonly ERROR_WINDOW_BEATS = 16;
+  // Recent unlock→drop spans, used as a median for the amplitude (= an
+  // estimate on movements where the drop is buried in the ringing burst).
+  private recentDeltaTMs: number[] = [];
   private predictionSample: number | null = null;
   private gateHalfSamples: number = 0;
   private gateBestSample: number | null = null;
@@ -643,13 +646,12 @@ export class AudioEngine {
       snippet[j] = this.ringBuffer[rIdx];
     }
 
-    // 3b. Wider window for the escapement pulse display, anchored to the
-    //     detected pulse peak. This is stable from beat to beat, so the
-    //     waveform no longer jumps around while the pulses are inspected.
-    // Wider window + anchor on the loudest impact (the drop), so the quiet
-    // unlocking/impulse click 15–25 ms earlier is inside the window on every
-    // beat. (Visually confirmed: the EB 8800 balance amplitude is low, so the
-    // pre-impact is the unlock, not an overbanking artefact.)
+    // 3b. Analysis window for the escapement peaks, anchored near the
+    //     loudest impact so the quiet unlocking/impulse click 15–25 ms earlier
+    //     is inside the window on every beat. The display snippet is rebuilt
+    //     below, anchored on t1, so it does not jump as sub-clicks trade
+    //     places. (Visually confirmed: the EB 8800 balance amplitude is low,
+    //     so the pre-impact is the unlock, not an overbanking artefact.)
     const scopeSamples = Math.floor(0.070 * sampleRate);
     const scopePreRoll = Math.floor(0.035 * sampleRate);
     const scopeWindow = Math.floor(0.035 * sampleRate);
@@ -688,6 +690,24 @@ export class AudioEngine {
     const scopeStartGlobal = globalTriggerSample + scopeDelta - scopePreRoll;
     const beatGlobalSample =
       scopeStartGlobal + Math.round((impulses.t1Ms / 1000) * sampleRate);
+
+    // Display window anchored on t1 (the unlock), not on whichever sub-click
+    // was loudest. This keeps the waveform still from beat to beat instead of
+    // jumping left/right when the impulse and drop trade places.
+    const displayPreRoll = Math.floor(0.010 * sampleRate);
+    const displaySamples = Math.floor(0.070 * sampleRate);
+    const displayStartGlobal = beatGlobalSample - displayPreRoll;
+    const displayDelta = displayStartGlobal - globalTriggerSample;
+    const displayStartRing =
+      (triggerRingIdx + displayDelta + this.RING_SIZE) % this.RING_SIZE;
+    const displaySnippet = new Float32Array(displaySamples);
+    for (let j = 0; j < displaySamples; j++) {
+      displaySnippet[j] =
+        this.ringBuffer[(displayStartRing + j) % this.RING_SIZE];
+    }
+    const displayT1Ms = (displayPreRoll / sampleRate) * 1000;
+    const displayT2Ms = displayT1Ms + (impulses.t2Ms - impulses.t1Ms);
+    const displayT3Ms = displayT1Ms + impulses.deltaTMs;
 
     let currentHalfPeriodMs = targetPeriodMs;
     if (this.lastBeatSampleTime > 0) {
@@ -808,10 +828,10 @@ export class AudioEngine {
       amplitudeDeg: amplitude,
       isTick: this.isTickTurn,
       deltaTImpulseMs: deltaTMs,
-      t1Ms,
-      t2Ms,
-      t3Ms,
-      waveformSnippet: scopeSnippet,
+      t1Ms: displayT1Ms,
+      t2Ms: displayT2Ms,
+      t3Ms: displayT3Ms,
+      waveformSnippet: displaySnippet,
       snippetSampleRate: sampleRate,
     };
 
@@ -924,25 +944,38 @@ export class AudioEngine {
       peaks.push({ idx: maxIdx, val: maxVal });
     }
 
-    // Escapement order: unlocking (first, quiet) → impulse → drop (loudest).
-    // T1 = first impact, T3 = loudest impact, Δt = unlock → drop. This is the
-    // timing-machine definition; counting only the ring-down under-read Δt and
-    // over-read the amplitude (350° instead of the visually low real swing).
-    const t1Peak = peaks[0];
-    let t3Peak = peaks[0];
+    // Group the peaks into impacts: ring-down lobes within ~5 ms belong to
+    // the same click.
+    const groups: { idx: number; val: number }[][] = [];
     for (const p of peaks) {
-      if (p.val > t3Peak.val) t3Peak = p;
+      const g = groups[groups.length - 1];
+      if (g && p.idx - g[g.length - 1].idx <= Math.floor(0.005 * sampleRate)) {
+        g.push(p);
+      } else {
+        groups.push([p]);
+      }
     }
-    // The impulse sits between the unlock and the drop, not on the banking
-    // impact. Search only the first 60 % of the unlock→drop span so t2 does
-    // not drift onto the drop's leading lobes.
-    const impulseLimit = t1Peak.idx + Math.floor((t3Peak.idx - t1Peak.idx) * 0.6);
-    let t2Peak = t1Peak;
-    for (const p of peaks) {
-      if (p.idx > t1Peak.idx && p.idx <= impulseLimit && p.val > t2Peak.val) t2Peak = p;
+    const loudest = (g: { idx: number; val: number }[]) =>
+      g.reduce((a, b) => (b.val > a.val ? b : a));
+
+    // T1 = first impact (unlock). The main burst (impulse + drop/ringing) is
+    // the loudest group: T2 = its loudest peak (impulse), T3 = its last peak
+    // (end of the burst / drop). This follows the visible burst on every beat,
+    // even when its position shifts — low-amplitude pin-levers do that.
+    const t1Peak = groups[0][0];
+    let loudGroup = groups[0];
+    let loudGroupVal = -1;
+    for (const g of groups) {
+      const v = loudest(g).val;
+      if (v > loudGroupVal) {
+        loudGroupVal = v;
+        loudGroup = g;
+      }
     }
+    let t2Peak = loudest(loudGroup);
+    let t3Peak = loudGroup[loudGroup.length - 1];
     if (t3Peak.idx <= t1Peak.idx) {
-      t3Peak = t1Peak;
+      t3Peak = loudest(peaks);
       t2Peak = t1Peak;
     }
 
@@ -955,9 +988,17 @@ export class AudioEngine {
     // the old 16 ms ceiling hid a low (real) amplitude.
     deltaTMs = Math.max(2.5, Math.min(45.0, deltaTMs));
 
+    // The t3 marker and Δt follow this beat's burst. For the amplitude, use a
+    // median span: the drop is buried in the ringing on these movements, so a
+    // single beat's end-point is a noisy estimate of the lift time.
+    this.recentDeltaTMs.push(deltaTMs);
+    if (this.recentDeltaTMs.length > 16) this.recentDeltaTMs.shift();
+    const sortedDeltaT = [...this.recentDeltaTMs].sort((a, b) => a - b);
+    const ampDeltaTMs = sortedDeltaT[Math.floor(sortedDeltaT.length / 2)];
+
     // 7. Amplitude Calculation
     const liftAngleRad = (liftAngle * Math.PI) / 180;
-    const omegaT = (Math.PI * deltaTMs) / targetPeriodMs;
+    const omegaT = (Math.PI * ampDeltaTMs) / targetPeriodMs;
     const sinVal = Math.sin(omegaT);
 
     let amplitude = 260;
@@ -1295,6 +1336,7 @@ export class AudioEngine {
     this.recentIntervalsMs = [];
     this.recentBeatErrorsMs = [];
     this.recentCycleRates = [];
+    this.recentDeltaTMs = [];
     this.pendingBph = null;
     this.pendingBphStreak = 0;
     this.recentBeatTimesMs = [];
@@ -1333,6 +1375,7 @@ export class AudioEngine {
     this.recentBeatErrorsMs = [];
     this.recentCycleRates = [];
     this.recentBeatTimesMs = [];
+    this.recentDeltaTMs = [];
     this.pendingBph = null;
     this.pendingBphStreak = 0;
     this.predictionSample = null;

@@ -186,7 +186,7 @@ export const WatchIdentificationCard: React.FC<Props> = ({ match, onApplyProfile
             <span className="text-stone-300">·</span>
             <span>Focus {(sound.focus * 100).toFixed(0)}</span>
             <span className="text-stone-300">·</span>
-            <span>Δt: <strong className="text-stone-800">{match.currentSignature.deltaTImpulseMs.toFixed(1)}ms</strong></span>
+            <span>Lift time: <strong className="text-stone-800">{match.currentSignature.deltaTImpulseMs.toFixed(1)}ms</strong></span>
           </div>
 
           {isIdentified && !noWatch && (

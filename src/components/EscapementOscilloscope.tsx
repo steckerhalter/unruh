@@ -1,7 +1,7 @@
 /**
  * Unruh - Escapement Pulse Waveform Oscilloscope
- * Visualizes the 3 acoustic impacts of the Swiss lever escapement:
- * 1. Unlocking (t1), 2. Impulse (t2), 3. Drop/Banking (t3) to compute Amplitude.
+ * Visualizes the unlock and banking impacts of the Swiss lever escapement
+ * to compute balance amplitude.
  * Styled in warm creamy parchment aesthetic with yellow/brown/khaki accents.
  */
 
@@ -103,77 +103,55 @@ export const EscapementOscilloscope: React.FC<Props> = ({ latestBeat, liftAngle 
       const totalSnippetMs = (len / sampleRate) * 1000;
 
       // Map dynamic timestamps to snippet relative ratios
-      const t1Ratio = Math.min(1.0, Math.max(0.0, activeBeat.t1Ms / totalSnippetMs));
-      const t2Ratio = Math.min(1.0, Math.max(0.0, activeBeat.t2Ms / totalSnippetMs));
-      const t3Ratio = Math.min(1.0, Math.max(0.0, activeBeat.t3Ms / totalSnippetMs));
+      const unlockRatio = Math.min(1.0, Math.max(0.0, activeBeat.unlockMs / totalSnippetMs));
+      const bankingRatio = Math.min(1.0, Math.max(0.0, activeBeat.bankingMs / totalSnippetMs));
 
-      const t1X = padL + t1Ratio * plotW;
-      const t2X = padL + t2Ratio * plotW;
-      const t3X = padL + t3Ratio * plotW;
+      const unlockX = padL + unlockRatio * plotW;
+      const bankingX = padL + bankingRatio * plotW;
 
-      // t1: Unlocking (Walnut Brown)
+      // Unlocking edge (Walnut Brown)
       ctx.strokeStyle = '#78350f';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
-      ctx.moveTo(t1X, padT);
-      ctx.lineTo(t1X, height - padB);
+      ctx.moveTo(unlockX, padT);
+      ctx.lineTo(unlockX, height - padB);
       ctx.stroke();
 
-      // t2 often lands on t1 (impulse merged with the unlock). When the
-      // markers are too close, drawing both lines makes t1 look amber and
-      // the labels overlap, so suppress the t2 marker entirely.
-      const t2TooClose =
-        Math.abs(t2X - t1X) < 70 || Math.abs(t2X - t3X) < 70;
-      if (!t2TooClose) {
-        // t2: Impulse (Golden Amber)
-        ctx.strokeStyle = '#d97706';
-        ctx.beginPath();
-        ctx.moveTo(t2X, padT);
-        ctx.lineTo(t2X, height - padB);
-        ctx.stroke();
-      }
-
-      // t3: Drop / Banking (Emerald Green)
+      // Drop / banking impact (Emerald Green)
       ctx.strokeStyle = '#059669';
       ctx.beginPath();
-      ctx.moveTo(t3X, padT);
-      ctx.lineTo(t3X, height - padB);
+      ctx.moveTo(bankingX, padT);
+      ctx.lineTo(bankingX, height - padB);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Delta-t bracket between t1 and t3 (Chestnut Brown)
+      // Lift-time bracket from unlock to banking (Chestnut Brown)
       const bracketY = padT + 14;
       ctx.strokeStyle = '#5c2b0c';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(t1X, bracketY);
-      ctx.lineTo(t3X, bracketY);
-      ctx.moveTo(t1X, bracketY - 3);
-      ctx.lineTo(t1X, bracketY + 3);
-      ctx.moveTo(t3X, bracketY - 3);
-      ctx.lineTo(t3X, bracketY + 3);
+      ctx.moveTo(unlockX, bracketY);
+      ctx.lineTo(bankingX, bracketY);
+      ctx.moveTo(unlockX, bracketY - 3);
+      ctx.lineTo(unlockX, bracketY + 3);
+      ctx.moveTo(bankingX, bracketY - 3);
+      ctx.lineTo(bankingX, bracketY + 3);
       ctx.stroke();
 
-      // Delta-t label
+      // Lift-time label
       ctx.fillStyle = '#5c2b0c';
       ctx.font = '600 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(`Δt ≈ ${activeBeat.deltaTImpulseMs.toFixed(2)} ms`, (t1X + t3X) / 2, bracketY - 5);
+      ctx.fillText(`Lift time ≈ ${activeBeat.liftTimeMs.toFixed(2)} ms`, (unlockX + bankingX) / 2, bracketY - 5);
 
       // Marker labels
       ctx.font = '10px "JetBrains Mono", monospace';
       ctx.fillStyle = '#78350f';
-      ctx.fillText('t1: Unlock', t1X, height - padB + 13);
-
-      // The t2 marker/label is suppressed when it would collide with t1 or t3.
-      if (!t2TooClose) {
-        ctx.fillStyle = '#d97706';
-        ctx.fillText('t2: Impulse', t2X, height - padB + 13);
-      }
+      ctx.fillText('Unlock', unlockX, height - padB + 13);
 
       ctx.fillStyle = '#059669';
-      ctx.fillText('t3: Banking (est.)', t3X, height - padB + 13);
+      ctx.fillText('Banking (est.)', bankingX, height - padB + 13);
     } else {
       ctx.fillStyle = '#8c7e6b';
       ctx.font = '11px "JetBrains Mono", monospace';

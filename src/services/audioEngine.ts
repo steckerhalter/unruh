@@ -414,22 +414,22 @@ export class AudioEngine {
     const channelData = buffer.getChannelData(0);
 
     const sr = this.audioCtx.sampleRate;
-    const t1Sample = Math.floor(0.002 * sr);
-    const t2Sample = Math.floor((0.002 + deltaTSeconds * 0.45) * sr);
-    const t3Sample = Math.floor((0.002 + deltaTSeconds) * sr);
+    const unlockSample = Math.floor(0.002 * sr);
+    const impulseSample = Math.floor((0.002 + deltaTSeconds * 0.45) * sr);
+    const bankingSample = Math.floor((0.002 + deltaTSeconds) * sr);
 
     for (let i = 0; i < bufferSize; i++) {
       let sample = 0;
-      if (i >= t1Sample) {
-        const dt = (i - t1Sample) / sr;
+      if (i >= unlockSample) {
+        const dt = (i - unlockSample) / sr;
         sample += 0.5 * Math.sin(2 * Math.PI * 4800 * dt) * Math.exp(-dt * 900);
       }
-      if (i >= t2Sample) {
-        const dt = (i - t2Sample) / sr;
+      if (i >= impulseSample) {
+        const dt = (i - impulseSample) / sr;
         sample += 0.35 * Math.sin(2 * Math.PI * 3900 * dt) * Math.exp(-dt * 650);
       }
-      if (i >= t3Sample) {
-        const dt = (i - t3Sample) / sr;
+      if (i >= bankingSample) {
+        const dt = (i - bankingSample) / sr;
         sample += 0.95 * Math.sin(2 * Math.PI * 5200 * dt) * Math.exp(-dt * 1200);
       }
       sample += (Math.random() * 2 - 1) * noiseLevel;
@@ -649,7 +649,7 @@ export class AudioEngine {
     // 3b. Analysis window for the escapement peaks, anchored near the
     //     loudest impact so the quiet unlocking/impulse click 15–25 ms earlier
     //     is inside the window on every beat. The display snippet is rebuilt
-    //     below, anchored on t1, so it does not jump as sub-clicks trade
+    //     below, anchored on the unlock, so it does not jump as sub-clicks trade
     //     places. (Visually confirmed: the EB 8800 balance amplitude is low,
     //     so the pre-impact is the unlock, not an overbanking artefact.)
     const scopeSamples = Math.floor(0.070 * sampleRate);
@@ -674,7 +674,7 @@ export class AudioEngine {
     const targetPeriodMs = 3600000 / this.watchConfig.effectiveBph;
 
     // Time the beat from the first visible escapement impact (the unlock) —
-    // the same peak the escapement scope labels t1 — not from the loudest
+    // the same peak the escapement scope labels Unlock — not from the loudest
     // sub-click. On low-amplitude movements the loudest can swap between the
     // unlock and the banking/drop (10–35 ms apart), which made the beat error
     // jump between clusters (e.g. 2 ms / 19 ms / 35 ms).
@@ -689,11 +689,11 @@ export class AudioEngine {
     if (scopeDelta < -this.RING_SIZE / 2) scopeDelta += this.RING_SIZE;
     const scopeStartGlobal = globalTriggerSample + scopeDelta - scopePreRoll;
     const beatGlobalSample =
-      scopeStartGlobal + Math.round((impulses.t1Ms / 1000) * sampleRate);
+      scopeStartGlobal + Math.round((impulses.unlockMs / 1000) * sampleRate);
 
-    // Display window anchored on t1 (the unlock), not on whichever sub-click
-    // was loudest. This keeps the waveform still from beat to beat instead of
-    // jumping left/right when the impulse and drop trade places.
+    // Display window anchored on the unlock, not on whichever sub-click was
+    // loudest. This keeps the waveform still from beat to beat instead of
+    // jumping left/right when the impulse and banking burst trade places.
     const displayPreRoll = Math.floor(0.010 * sampleRate);
     const displaySamples = Math.floor(0.070 * sampleRate);
     const displayStartGlobal = beatGlobalSample - displayPreRoll;
@@ -705,9 +705,8 @@ export class AudioEngine {
       displaySnippet[j] =
         this.ringBuffer[(displayStartRing + j) % this.RING_SIZE];
     }
-    const displayT1Ms = (displayPreRoll / sampleRate) * 1000;
-    const displayT2Ms = displayT1Ms + (impulses.t2Ms - impulses.t1Ms);
-    const displayT3Ms = displayT1Ms + impulses.deltaTMs;
+    const displayUnlockMs = (displayPreRoll / sampleRate) * 1000;
+    const displayBankingMs = displayUnlockMs + impulses.deltaTMs;
 
     let currentHalfPeriodMs = targetPeriodMs;
     if (this.lastBeatSampleTime > 0) {
@@ -808,15 +807,7 @@ export class AudioEngine {
     this.lastBeatSampleTime = beatGlobalSample;
     this.isTickTurn = !this.isTickTurn;
 
-    const { deltaTMs, amplitude, t1Ms, t2Ms, t3Ms } = impulses;
-
-    // Debugging verification outputs
-    if (this.audioSettings.debug === true) {
-      console.log(
-        `[AudioEngine Beat #${this.beatCounter}] T1: ${t1Ms.toFixed(2)}ms | T2: ${t2Ms.toFixed(2)}ms | T3: ${t3Ms.toFixed(2)}ms | Δt: ${deltaTMs.toFixed(2)}ms | Amp: ${amplitude}°`
-      );
-      this.debugInspectSnippet(scopeSnippet, sampleRate, t1Ms, t2Ms, t3Ms);
-    }
+    const { deltaTMs, amplitude } = impulses;
 
     const measurement: BeatMeasurement = {
       id: this.beatCounter,
@@ -827,10 +818,9 @@ export class AudioEngine {
       beatErrorMs,
       amplitudeDeg: amplitude,
       isTick: this.isTickTurn,
-      deltaTImpulseMs: deltaTMs,
-      t1Ms: displayT1Ms,
-      t2Ms: displayT2Ms,
-      t3Ms: displayT3Ms,
+      liftTimeMs: deltaTMs,
+      unlockMs: displayUnlockMs,
+      bankingMs: displayBankingMs,
       waveformSnippet: displaySnippet,
       snippetSampleRate: sampleRate,
     };
@@ -877,7 +867,7 @@ export class AudioEngine {
     sampleRate: number,
     targetPeriodMs: number,
     liftAngle: number
-  ): { deltaTMs: number; amplitude: number; t1Ms: number; t2Ms: number; t3Ms: number } {
+  ): { deltaTMs: number; amplitude: number; unlockMs: number; bankingMs: number } {
     const len = snippet.length;
     const win = 3;
 
@@ -902,7 +892,7 @@ export class AudioEngine {
       }
     }
     if (!(maxVal > 0)) {
-      return { deltaTMs: 4, amplitude: 260, t1Ms: 2, t2Ms: 3, t3Ms: 7 };
+      return { deltaTMs: 4, amplitude: 260, unlockMs: 2, bankingMs: 7 };
     }
 
     let noise = Number.POSITIVE_INFINITY;
@@ -958,39 +948,38 @@ export class AudioEngine {
     const loudest = (g: { idx: number; val: number }[]) =>
       g.reduce((a, b) => (b.val > a.val ? b : a));
 
-    // T1 = first impact (unlock). The main burst (impulse + drop/ringing) is
-    // the loudest group: T2 = its loudest peak (impulse), T3 = its last peak
-    // (end of the burst / drop). This follows the visible burst on every beat,
-    // even when its position shifts — low-amplitude pin-levers do that.
-    const t1Peak = groups[0][0];
-    let loudGroup = groups[0];
-    let loudGroupVal = -1;
-    for (const g of groups) {
+    // Unlock = first impact. The drop is the loudest peak of the main burst
+    // after the unlock group; using the last peak let the selection follow the
+    // ring-down tail and read 45 ms on low-amplitude movements.
+    const unlockPeak = groups[0][0];
+    const mainStart = groups.length > 1 ? 1 : 0;
+    let mainGroup = groups[mainStart];
+    let mainGroupVal = -1;
+    for (let gi = mainStart; gi < groups.length; gi++) {
+      const g = groups[gi];
       const v = loudest(g).val;
-      if (v > loudGroupVal) {
-        loudGroupVal = v;
-        loudGroup = g;
+      if (v > mainGroupVal) {
+        mainGroupVal = v;
+        mainGroup = g;
       }
     }
-    let t2Peak = loudest(loudGroup);
-    let t3Peak = loudGroup[loudGroup.length - 1];
-    if (t3Peak.idx <= t1Peak.idx) {
-      t3Peak = loudest(peaks);
-      t2Peak = t1Peak;
+    let bankingPeak = loudest(mainGroup);
+    if (bankingPeak.idx <= unlockPeak.idx) {
+      bankingPeak = groups[0][groups[0].length - 1];
     }
 
-    const t1Ms = (t1Peak.idx / sampleRate) * 1000;
-    const t2Ms = (t2Peak.idx / sampleRate) * 1000;
-    const t3Ms = (t3Peak.idx / sampleRate) * 1000;
+    const unlockMs = (unlockPeak.idx / sampleRate) * 1000;
+    const bankingMs = (bankingPeak.idx / sampleRate) * 1000;
 
-    let deltaTMs = t3Ms - t1Ms;
-    // The unlock→drop span on these pin-lever movements can be 20–40 ms;
+    let deltaTMs = bankingMs - unlockMs;
+    // The unlock→banking span on these pin-lever movements can be 20–40 ms;
     // the old 16 ms ceiling hid a low (real) amplitude.
     deltaTMs = Math.max(2.5, Math.min(45.0, deltaTMs));
 
-    // The t3 marker and Δt follow this beat's burst. For the amplitude, use a
-    // median span: the drop is buried in the ringing on these movements, so a
-    // single beat's end-point is a noisy estimate of the lift time.
+    // The banking marker and lift time follow this beat's burst. For the
+    // amplitude, use a median span: the drop is buried in the ringing on these
+    // movements, so a single beat's end-point is a noisy estimate of the lift
+    // time.
     this.recentDeltaTMs.push(deltaTMs);
     if (this.recentDeltaTMs.length > 16) this.recentDeltaTMs.shift();
     const sortedDeltaT = [...this.recentDeltaTMs].sort((a, b) => a - b);
@@ -1009,26 +998,7 @@ export class AudioEngine {
       amplitude = Math.max(40, Math.min(360, amplitude));
     }
 
-    return { deltaTMs, amplitude, t1Ms, t2Ms, t3Ms };
-  }
-
-  private debugInspectSnippet(
-    snippet: Float32Array,
-    sampleRate: number,
-    t1Ms: number,
-    t2Ms: number,
-    t3Ms: number
-  ) {
-    const t1Idx = Math.round((t1Ms / 1000) * sampleRate);
-    const t2Idx = Math.round((t2Ms / 1000) * sampleRate);
-    const t3Idx = Math.round((t3Ms / 1000) * sampleRate);
-
-    console.groupCollapsed(`[Snippet Sample Inspection - Beat #${this.beatCounter}]`);
-    console.log(`Sample Rate: ${sampleRate} Hz | Total Snippet Samples: ${snippet.length}`);
-    console.log(`T1 (Unlock) Index: ${t1Idx} [Val: ${snippet[t1Idx]?.toFixed(4)}]`);
-    console.log(`T2 (Impulse) Index: ${t2Idx} [Val: ${snippet[t2Idx]?.toFixed(4)}]`);
-    console.log(`T3 (Banking) Index: ${t3Idx} [Val: ${snippet[t3Idx]?.toFixed(4)}]`);
-    console.groupEnd();
+    return { deltaTMs, amplitude, unlockMs, bankingMs };
   }
 
   /**

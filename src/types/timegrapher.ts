@@ -30,10 +30,9 @@ export interface BeatMeasurement {
   beatErrorMs: number; // e.g. 0.2 ms
   amplitudeDeg: number; // e.g. 285°
   isTick: boolean; // Alternates tick / tock
-  deltaTImpulseMs: number; // t3 - t1 duration
-  t1Ms: number; // Unlocking edge
-  t2Ms: number; // Impulse impact
-  t3Ms: number; // Drop / banking impact
+  liftTimeMs: number; // unlock-to-banking duration
+  unlockMs: number; // Unlocking edge
+  bankingMs: number; // Drop / banking impact
   waveformSnippet?: Float32Array; // Acoustic snippet of the escapement click
   snippetSampleRate?: number; // Sample rate of waveformSnippet (for the pulse display)
 }

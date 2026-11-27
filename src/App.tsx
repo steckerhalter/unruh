@@ -36,6 +36,8 @@ import { WatchIdentificationCard } from './components/WatchIdentificationCard';
 import { AudioSettingsModal } from './components/AudioSettingsModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { DebugCapturePanel } from './components/DebugCapturePanel';
+import { isDebugCaptureEnabled, recordDebugBeat } from './services/debugCapture';
 
 import {
   Mic,
@@ -44,6 +46,7 @@ import {
   Clock,
   Filter,
   Fingerprint,
+  Bug,
 } from 'lucide-react';
 
 export default function App() {
@@ -85,6 +88,7 @@ export default function App() {
   // Modal states
   const [isAudioModalOpen, setIsAudioModalOpen] = useState<boolean>(false);
   const [debugCopied, setDebugCopied] = useState<boolean>(false);
+  const [isDebugCaptureOpen, setIsDebugCaptureOpen] = useState<boolean>(false);
 
   // Initialize Audio Engine once
   useEffect(() => {
@@ -104,6 +108,18 @@ export default function App() {
         }
         return updated;
       });
+
+      // Debug capture (off by default). The diagnostics snapshot allocates,
+      // so it is only built while capture is running; this handler already
+      // runs outside the ScriptProcessor callback.
+      if (isDebugCaptureEnabled()) {
+        const diagnostics = engine.getDiagnostics();
+        recordDebugBeat(beat, {
+          bph: diagnostics.effectiveBph,
+          noise: diagnostics.backgroundNoiseLevel,
+          threshold: diagnostics.adaptiveThreshold,
+        });
+      }
     };
 
     engine.onLevel = (rms, peak) => {
@@ -746,6 +762,17 @@ export default function App() {
                       >
                         {debugCopied ? 'Copied' : 'Copy debug'}
                       </button>
+                      <button
+                        onClick={() => setIsDebugCaptureOpen((open) => !open)}
+                        title="Open the debug capture panel (per-beat log + envelopes)"
+                        className={`flex items-center gap-0.5 text-[9px] font-mono px-1.5 py-0.5 rounded border transition ${
+                          isDebugCaptureOpen
+                            ? 'border-[#b45309] bg-[#efe7d6] text-[#78350f]'
+                            : 'border-[#ded5c5] bg-[#f5f0e4] text-stone-700 hover:text-stone-900 hover:border-[#b45309]'
+                        }`}
+                      >
+                        <Bug size={10} /> Capture
+                      </button>
                     </span>
                   </div>
 
@@ -865,6 +892,9 @@ export default function App() {
 
       {/* Offline Status Banner */}
       <OfflineIndicator />
+
+      {/* Debug capture (per-beat log, optional to stream to the dev sink) */}
+      <DebugCapturePanel open={isDebugCaptureOpen} onClose={() => setIsDebugCaptureOpen(false)} />
     </div>
   );
 }

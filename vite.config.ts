@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {readdirSync, statSync} from 'node:fs';
+import {appendFileSync, mkdirSync, readdirSync, renameSync, statSync} from 'node:fs';
 import type {ServerResponse} from 'node:http';
 import {defineConfig, type Connect, type ViteDevServer} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
@@ -35,6 +35,124 @@ const unruhRecordingsListingPlugin = {
   },
 };
 
+/**
+ * Dev-only sink for the app's debug capture (src/services/debugCapture.ts).
+ *
+ * The app POSTs newline-delimited per-beat JSON here and the plugin appends it
+ * to `.unruh-debug/live.ndjson`, so the data can be inspected with jq/python
+ * instead of being copy-pasted out of the UI by hand. Kept out of the build
+ * (`apply: 'serve'`): GitHub Pages has no endpoint and must not receive
+ * accidental writes.
+ *
+ * Rotation keeps a long live session from growing without bound; the previous
+ * file stays next to it for comparison.
+ */
+const unruhDebugSinkPlugin = {
+  name: 'unruh-debug-sink',
+  apply: 'serve' as const,
+  configureServer(server: ViteDevServer) {
+    const dir = path.join(__dirname, '.unruh-debug');
+    const file = path.join(dir, 'live.ndjson');
+    const MAX_BYTES = 20 * 1024 * 1024;
+    const MAX_BODY = 8 * 1024 * 1024;
+    let lines = 0;
+
+    const rotateIfNeeded = () => {
+      let size = 0;
+      try {
+        size = statSync(file).size;
+      } catch {
+        return;
+      }
+      if (size >= MAX_BYTES) {
+        renameSync(file, path.join(dir, `live-${Date.now()}.ndjson`));
+        lines = 0;
+      }
+    };
+
+    server.middlewares.use((req: Connect.IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
+      const url = new URL(req.url || '/', 'http://localhost');
+      const isSink = url.pathname === '/unruh/__unruh-debug' || url.pathname === '/__unruh-debug';
+      const isStatus =
+        url.pathname === '/unruh/__unruh-debug/status' || url.pathname === '/__unruh-debug/status';
+      const isReset =
+        url.pathname === '/unruh/__unruh-debug/reset' || url.pathname === '/__unruh-debug/reset';
+
+      // "Clear" in the panel rotates instead of truncating, so the previous run
+      // stays on disk for comparison (mic run vs synthesizer run, before vs
+      // after a landmark change).
+      if (isReset) {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end('POST only');
+          return;
+        }
+        try {
+          if (statSync(file).size > 0) {
+            renameSync(file, path.join(dir, `live-${Date.now()}.ndjson`));
+          }
+        } catch {
+          /* nothing captured yet */
+        }
+        lines = 0;
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+
+      if (isStatus) {
+        let bytes = 0;
+        let updatedAt: string | null = null;
+        try {
+          const st = statSync(file);
+          bytes = st.size;
+          updatedAt = st.mtime.toISOString();
+        } catch {
+          /* no capture yet */
+        }
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ok: true, file: '.unruh-debug/live.ndjson', bytes, lines, updatedAt}));
+        return;
+      }
+
+      if (isSink) {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end('POST only');
+          return;
+        }
+        let body = '';
+        let tooLarge = false;
+        req.setEncoding('utf8');
+        req.on('data', (chunk: string) => {
+          body += chunk;
+          if (body.length > MAX_BODY) {
+            tooLarge = true;
+            req.destroy();
+          }
+        });
+        req.on('end', () => {
+          if (tooLarge) return;
+          try {
+            mkdirSync(dir, {recursive: true});
+            rotateIfNeeded();
+            appendFileSync(file, body.endsWith('\n') ? body : `${body}\n`);
+            lines += body.split('\n').filter((line) => line.trim().length > 0).length;
+            res.statusCode = 204;
+            res.end();
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(String(err));
+          }
+        });
+        return;
+      }
+
+      next();
+    });
+  },
+};
+
 export default defineConfig(() => {
   return {
     base: '/unruh/',
@@ -42,6 +160,7 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       unruhRecordingsListingPlugin,
+      unruhDebugSinkPlugin,
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'icon.svg', 'apple-touch-icon.png'],

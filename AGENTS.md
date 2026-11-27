@@ -37,8 +37,8 @@ it, and keep to `~/code` (never look in other home folders for recordings).
 - `src/App.tsx` — state, measurement history, UI wiring/tabs.
 - `src/components/OscilloscopeRateTrend.tsx` — rate graph (defaults to smoothed;
   stats describe the drawn series).
-- `src/components/EscapementOscilloscope.tsx` — 70 ms pulse waveform, t1/t2/t3
-  markers, Δt bracket.
+- `src/components/EscapementOscilloscope.tsx` — 70 ms pulse waveform,
+  Unlock/Banking markers, lift-time bracket.
 - `src/components/MovementSimulatorPanel.tsx` — Synthesizer / Recording source.
 - `src/services/recordingsLibrary.ts` — file listing + File System Access folder
   picker; `src/services/watchFingerprintEngine.ts` — profiles/matching.
@@ -56,21 +56,24 @@ reintroduces jitter or wrong BPH.
 1. **Gated detection**: after ~8 beats, predict the next beat and take the
    **loudest envelope sample inside ±0.25·T**. Do not use the old "sharpest
    local maximum / 1.6× rise" test — it picked sub-clicks and jittered.
-2. **Beat time = t1 (the unlock)**, the first visible escapement impact in the
-   scope, not the loudest burst. Impulse and drop are 10–35 ms apart; timing
-   the loudest made beat error jump between clusters (2 / 19 / 35 ms).
+2. **Beat time = unlock**, the first visible escapement impact in the scope,
+   not the loudest burst. Impulse and drop are 10–35 ms apart; timing the
+   loudest made beat error jump between clusters (2 / 19 / 35 ms).
 3. **Rate/BPH**: robust 3-parameter grid (`t = a + b·i + c·(−1)^i`) over
    **48 beats**, with outlier rejection. A beat is only ~0.2 s, so 1 ms of
    jitter = ~430 s/d; the long window is what makes the display stable.
 4. **Beat error**: median of even-vs-odd residuals over **16 beats**, referred
    to the long-window rate slope (robust to single bad beats).
-5. **Amplitude**: computed from unlock→drop (`Δt`) using a **median Δt over
-   ~16 beats** (the drop is buried in ringing on cheap movements). The t3
-   marker and Δt text follow the beat's main burst; the amplitude uses the
-   median. Δt is clamped 2.5–45 ms; amplitude 40–360°.
-6. **Display snippet is anchored on t1** with 10 ms pre-roll, so the waveform
-   does not jump when a different sub-click is loudest. t3/Δt are labelled
-   `≈` / “Banking (est.)”.
+5. **Amplitude**: computed from unlock→banking lift time using a **median lift
+   time over ~16 beats** (the drop is buried in ringing on cheap movements).
+   The Banking marker is the loudest peak of the main burst after the unlock
+   group — not the last ring-down lobe — and the lift-time text follows it.
+   The amplitude uses the median. Lift time is clamped 2.5–45 ms; amplitude
+   40–360°.
+6. **Display snippet is anchored on the unlock** with 10 ms pre-roll, so the
+   waveform does not jump when a different sub-click is loudest. Only Unlock
+   and Banking are marked; do not reintroduce a t2/impulse marker — it is not
+   used in the math and cannot be located reliably.
 7. **Auto-BPH** has 3-window hysteresis. On a new recording, auto mode resets
    to 21,600 so a short lockout from the previous file cannot trap it.
 8. **Starting a recording** must stop the previous `AudioBufferSourceNode` and
@@ -82,6 +85,32 @@ reintroduces jitter or wrong BPH.
 
 The ring buffer is 19200 samples with a `+2048` lead offset in
 `handleDetectedBeatFromRing`; changing it breaks the scope/timestamps.
+
+## Known limit: amplitude on ambiguous drop signatures
+
+On the Irax EB8800 (pin-lever, ~18 ms out of beat) the unlock→banking span is
+**bimodal** — modes near 18–22 ms and 32–36 ms — because the second and third
+acoustic lobes are comparable in loudness (52 % of beats peak after 36 ms,
+48 % before). So "loudest peak of the main burst" flips between them and the
+16-beat median traverses the saddle between the two modes.
+
+Everything below was measured with the debug capture, not estimated:
+
+- per-beat lift ranges ~7–45 ms; the amplitude readout moves ~19–32°;
+- no selection rule fixes it — last/first significant group, strongest group,
+  the 16-beat median envelope and an envelope energy centroid all leave a
+  14–33° swing;
+- changing the landmark moves the *absolute* value (≈60° vs ≈80°) but not the
+  spread: two runs on the same watch, same position, ~20 min apart differed by
+  **12–15° with every estimator**, so contact/position dominates the rule.
+
+Treat amplitude on such a movement as **±15°**, and compare runs made with the
+same position/winding. Do not "stabilise" it by clamping or by redefining the
+landmark: the engine's median is already the most robust choice. Verify any
+future landmark change with a full-rate capture (panel → "full 48 kHz
+snippets") and replay before/after. The grouping logic is exact on the
+synthesizer (≤0.05 ms), but the synthesizer clamps its own lift time to
+2.9–15 ms, so it cannot reproduce this case.
 
 ## Product invariants (user decisions)
 
@@ -135,6 +164,36 @@ and 18,000 bph, including mid-click traps. They are not in the app list; to
 test, copy one into `public/recordings/`, reload, use Simulate → Recording,
 then remove it. Regenerate with `python3 test-fixtures/audio/generate.py`.
 Expected: 18,000 bph and 1.5 ms for every fixture.
+
+## Debug capture (per-beat log)
+
+`src/services/debugCapture.ts` writes one JSON object per beat — interval, lift
+time, amplitude, beat error, BPH, noise floor, threshold — plus an optional
+70 ms envelope decimated to ~1 kHz. Envelopes are what make a *pick* checkable
+after the fact ("did Unlock land on the faint blip or on the burst 10–30 ms
+later?"); screenshots of the median-smoothed dashboard cannot answer that.
+
+Off by default. Toggle it in **Calibration & Filter → Capture**.
+
+- **Dev**: lines are POSTed to the plugin in `vite.config.ts`
+  (`POST /unruh/__unruh-debug`) and appended to `.unruh-debug/live.ndjson`
+  (rotates at 20 MB, gitignored). Read it directly instead of pasting:
+  - `jq -r '[.b,.dt,.lift,.amp,.be,.bph]|@tsv' .unruh-debug/live.ndjson | tail -20`
+  - `jq -s '[.[]|.lift]|sort|.[length/2]' .unruh-debug/live.ndjson`
+  - `jq -c 'select(.lift > 30)' .unruh-debug/live.ndjson`
+- **Production** (GitHub Pages) has no endpoint: the buffer stays in memory and
+  the panel's **Save** button downloads JSONL.
+- **Full-rate snippets** (panel checkbox, off by default) add `pcm`: base64
+  Int16 of the same 70 ms snippet, normalised by `peak` (~9 KB/beat, capped at
+  500). Decode as `int16/32767 * peak`. Use this for landmark work — at 1 kHz
+  the grouping constants lose resolution and Unlock merges into the burst.
+  A full-rate replay matches the engine's recorded lift to 0.16 ms mean error.
+- **Clear** in the panel rotates the file (`POST …/__unruh-debug/reset`) to
+  `live-<timestamp>.ndjson` instead of truncating, so runs can be compared.
+- Envelope values are 0–255 *per beat*; the absolute level is in `peak`, so
+  gain/contact changes stay visible.
+- The recorder is fed from `onBeat` (already outside the ScriptProcessor
+  callback). Never call it from inside the audio callback.
 
 ## Gotchas
 

@@ -84,6 +84,7 @@ export default function App() {
 
   // Modal states
   const [isAudioModalOpen, setIsAudioModalOpen] = useState<boolean>(false);
+  const [debugCopied, setDebugCopied] = useState<boolean>(false);
 
   // Initialize Audio Engine once
   useEffect(() => {
@@ -344,6 +345,18 @@ export default function App() {
 
   const handleClearHistory = () => {
     setMeasurements([]);
+  };
+
+  const handleCopyDiagnostics = async () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(engine.getDiagnostics(), null, 2));
+      setDebugCopied(true);
+      setTimeout(() => setDebugCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable (e.g. not a secure context) */
+    }
   };
 
   // Compute stabilized rolling median for telemetry
@@ -722,8 +735,17 @@ export default function App() {
                 <div className="px-3.5 py-2.5 bg-white border border-[#ded5c5] rounded-xl shadow-xs space-y-1.5">
                   <div className="flex items-center justify-between text-[10px] text-stone-500 font-mono">
                     <span className="uppercase tracking-wider font-semibold">CALIBRATION & FILTER</span>
-                    <span className="text-[10px] text-[#78350f] font-mono uppercase font-bold">
-                      {watchConfig.bphMode === 'auto' ? 'Auto-Lock' : 'Manual'}
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-[#78350f] font-mono uppercase font-bold">
+                        {watchConfig.bphMode === 'auto' ? 'Auto-Lock' : 'Manual'}
+                      </span>
+                      <button
+                        onClick={handleCopyDiagnostics}
+                        title="Copy detector state (BPH, lockout, raw intervals) for debugging"
+                        className="text-[9px] font-mono px-1.5 py-0.5 rounded border border-[#ded5c5] bg-[#f5f0e4] text-stone-700 hover:text-stone-900 hover:border-[#b45309] transition"
+                      >
+                        {debugCopied ? 'Copied' : 'Copy debug'}
+                      </button>
                     </span>
                   </div>
 

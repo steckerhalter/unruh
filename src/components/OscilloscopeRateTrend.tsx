@@ -50,7 +50,9 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [yScaleMode] = useState<YScaleMode>('auto-lock');
-  const [isSmoothed, setIsSmoothed] = useState<boolean>(false);
+  // A timegrapher trace is normally averaged; raw per-beat rate is dominated
+  // by the fact that one beat is only ~0.2 s (1 ms of jitter = 430 s/d).
+  const [isSmoothed, setIsSmoothed] = useState<boolean>(true);
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number; measurement: BeatMeasurement } | null>(null);
 
   // Auto-lock bounds: recalculates and locks strictly every 5 seconds
@@ -89,11 +91,14 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
     return result;
   }, [measurements, windowBeats]);
 
-  // Keep a fresh reference to displayData for the 5s interval timer
-  const displayDataRef = useRef(displayData);
+  // Keep fresh references to the *drawn* series for the 5s interval timer.
+  // The scale must be derived from the same data that is plotted; deriving it
+  // from the smoothed series while plotting raw beats made ordinary jitter
+  // shoot off-scale and draw as full-height vertical lines.
+  const drawnDataRef = useRef<BeatMeasurement[]>([]);
   useEffect(() => {
-    displayDataRef.current = displayData;
-  }, [displayData]);
+    drawnDataRef.current = isSmoothed ? displayData : measurements;
+  }, [isSmoothed, displayData, measurements]);
 
   // Calculate auto bounds
   const calculateAutoBounds = (data: BeatMeasurement[]) => {
@@ -101,51 +106,58 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
       return { minY: targetRate - 20, maxY: targetRate + 20 };
     }
 
-    let minRate = Infinity;
-    let maxRate = -Infinity;
+    const values = data
+      .map((d) => d.rateErrorSecondsPerDay)
+      .filter((v) => Number.isFinite(v))
+      .sort((a, b) => a - b);
 
-    for (let i = 0; i < data.length; i++) {
-      const val = data[i].rateErrorSecondsPerDay;
-      if (val < minRate) minRate = val;
-      if (val > maxRate) maxRate = val;
+    if (values.length === 0) {
+      return { minY: targetRate - 20, maxY: targetRate + 20 };
     }
+
+    // Robust range: ignore the most extreme ~2% so one bad beat does not
+    // rescale the whole chart. Beyond-scale beats are drawn as edge ticks.
+    const q = (p: number) =>
+      values[Math.min(values.length - 1, Math.max(0, Math.floor((values.length - 1) * p)))];
+    const minRate = values.length >= 20 ? q(0.02) : values[0];
+    const maxRate = values.length >= 20 ? q(0.98) : values[values.length - 1];
 
     const spread = Math.max(4, maxRate - minRate);
     const padding = spread * 0.2;
 
-    minRate -= padding;
-    maxRate += padding;
-
-    // Ensure zero target line remains visible
-    minRate = Math.min(minRate, targetRate - 1);
-    maxRate = Math.max(maxRate, targetRate + 1);
+    // Always show at least ±20 s/d around the target, and never wider than
+    // the engine's per-cycle sanity clamp.
+    const lo = Math.max(Math.min(minRate - padding, targetRate - 20), targetRate - 3800);
+    const hi = Math.min(Math.max(maxRate + padding, targetRate + 20), targetRate + 3800);
 
     return {
-      minY: Math.floor(minRate),
-      maxY: Math.ceil(maxRate),
+      minY: Math.floor(lo),
+      maxY: Math.ceil(hi),
     };
   };
 
   // Timer: recalculates & updates scale strictly every 5 seconds
   useEffect(() => {
     const updateBounds = () => {
-      setAutoLockedBounds(calculateAutoBounds(displayDataRef.current));
+      setAutoLockedBounds(calculateAutoBounds(drawnDataRef.current));
     };
 
     updateBounds();
     const intervalId = setInterval(updateBounds, 5000);
 
     return () => clearInterval(intervalId);
-  }, [targetRate]);
+  }, [targetRate, isSmoothed]);
 
   // Latest rate measurement
   const latest = isSmoothed && displayData.length > 0
     ? displayData[displayData.length - 1]
     : measurements[measurements.length - 1];
 
-  // Statistics over visible window
+  // Statistics over the series actually drawn (smoothed or raw), so the
+  // displayed range and stability describe what the user sees.
   const stats = useMemo(() => {
-    const len = measurements.length;
+    const series = isSmoothed ? displayData : measurements;
+    const len = series.length;
     if (len === 0) {
       return { avg: 0, min: 0, max: 0, stdDev: 0, count: 0 };
     }
@@ -157,7 +169,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
     let count = 0;
 
     for (let i = len - 1; i >= 0; i--) {
-      const m = measurements[i];
+      const m = series[i];
       if (m.timestamp < cutoff) break;
 
       const v = m.rateErrorSecondsPerDay;
@@ -168,7 +180,7 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
     }
 
     if (count === 0) {
-      const last = measurements[len - 1];
+      const last = series[len - 1];
       return { avg: last.rateErrorSecondsPerDay, min: last.rateErrorSecondsPerDay, max: last.rateErrorSecondsPerDay, stdDev: 0, count: 1 };
     }
 
@@ -176,11 +188,11 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
     let sumSqDiff = 0;
 
     for (let i = len - count; i < len; i++) {
-      sumSqDiff += Math.pow(measurements[i].rateErrorSecondsPerDay - avg, 2);
+      sumSqDiff += Math.pow(series[i].rateErrorSecondsPerDay - avg, 2);
     }
 
     return { avg, min, max, stdDev: Math.sqrt(sumSqDiff / count), count };
-  }, [measurements, timeWindow]);
+  }, [measurements, displayData, isSmoothed, timeWindow]);
 
   // Canvas drawing loop
   useEffect(() => {
@@ -226,6 +238,12 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         const normalized = (rate - minY) / yRange;
         return paddingTop + plotHeight * (1 - normalized);
       };
+
+      // Points outside the plot are not connected: a single outlier used to
+      // draw a full-height vertical line through the whole chart.
+      const viewTop = paddingTop - 2;
+      const viewBottom = paddingTop + plotHeight + 2;
+      const inView = (y: number) => y >= viewTop && y <= viewBottom;
 
       let now: number;
       if (!isRunning || isPaused) {
@@ -329,50 +347,38 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
           isTick: pt.isTick,
         }));
 
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = 'rgba(194, 120, 3, 0.22)';
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
+        const drawTrace = (stroke: string, width: number) => {
+          ctx.lineWidth = width;
+          ctx.strokeStyle = stroke;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          for (let i = 0; i < points.length; i++) {
+            const p = points[i];
+            // Keep the curve continuous: beats beyond the (robust) scale ride
+            // the top/bottom edge instead of leaving gaps in the trace.
+            const y = Math.max(viewTop, Math.min(viewBottom, p.y));
+            if (i === 0) ctx.moveTo(p.x, y);
+            else ctx.lineTo(p.x, y);
+          }
+          ctx.stroke();
+        };
 
-        if (isSmoothed && points.length > 2) {
-          for (let i = 0; i < points.length - 1; i++) {
-            const xc = (points[i].x + points[i + 1].x) / 2;
-            const yc = (points[i].y + points[i + 1].y) / 2;
-            ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-          }
-          ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-        } else {
-          for (let i = 1; i < points.length; i++) {
-            ctx.lineTo(points[i].x, points[i].y);
-          }
-        }
-        ctx.stroke();
-
-        ctx.lineWidth = 2.25;
-        ctx.strokeStyle = '#b45309';
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-
-        if (isSmoothed && points.length > 2) {
-          for (let i = 0; i < points.length - 1; i++) {
-            const xc = (points[i].x + points[i + 1].x) / 2;
-            const yc = (points[i].y + points[i + 1].y) / 2;
-            ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-          }
-          ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-        } else {
-          for (let i = 1; i < points.length; i++) {
-            ctx.lineTo(points[i].x, points[i].y);
-          }
-        }
-        ctx.stroke();
+        drawTrace('rgba(194, 120, 3, 0.22)', 4);
+        drawTrace('#b45309', 2.25);
 
         for (let i = 0; i < points.length; i++) {
-          ctx.fillStyle = points[i].isTick ? '#d97706' : '#78350f';
+          const p = points[i];
+          if (!inView(p.y)) {
+            // Show that a beat was off-scale without a vertical line.
+            const edgeY = p.y < viewTop ? viewTop + 3 : viewBottom - 3;
+            ctx.fillStyle = 'rgba(180, 83, 9, 0.55)';
+            ctx.fillRect(p.x - 1, edgeY - 1.5, 2, 3);
+            continue;
+          }
+          ctx.fillStyle = p.isTick ? '#d97706' : '#78350f';
           ctx.beginPath();
-          ctx.arc(points[i].x, points[i].y, 2.5, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -382,17 +388,19 @@ export const OscilloscopeRateTrend: React.FC<Props> = ({
         const lastX = timeToX(latest.timestamp);
         const lastY = rateToY(latest.rateErrorSecondsPerDay);
 
-        const pulse = 4 + Math.sin(now * 0.008) * 2;
-        ctx.strokeStyle = 'rgba(180, 83, 9, 0.6)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(lastX, lastY, pulse, 0, Math.PI * 2);
-        ctx.stroke();
+        if (inView(lastY)) {
+          const pulse = 4 + Math.sin(now * 0.008) * 2;
+          ctx.strokeStyle = 'rgba(180, 83, 9, 0.6)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(lastX, lastY, pulse, 0, Math.PI * 2);
+          ctx.stroke();
 
-        ctx.fillStyle = '#b45309';
-        ctx.beginPath();
-        ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
-        ctx.fill();
+          ctx.fillStyle = '#b45309';
+          ctx.beginPath();
+          ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
 
       // 5. Probe Tooltip

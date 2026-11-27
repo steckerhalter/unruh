@@ -97,9 +97,9 @@ export const EscapementOscilloscope: React.FC<Props> = ({ latestBeat, liftAngle 
       }
       ctx.stroke();
 
-      // Snippet total duration in ms (45ms at 48kHz = 2160 samples)
-      // Assuming 48kHz sample rate; snippet length / 48
-      const sampleRate = 48000;
+      // Snippet total duration in ms. Use the real sample rate the beat was
+      // captured at — assuming 48 kHz shifted every marker on 44.1 kHz devices.
+      const sampleRate = activeBeat.snippetSampleRate ?? 48000;
       const totalSnippetMs = (len / sampleRate) * 1000;
 
       // Map dynamic timestamps to snippet relative ratios

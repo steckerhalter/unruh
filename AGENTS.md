@@ -160,6 +160,33 @@ Offline cross-check (independent of the app): decode with `ffmpeg`, 400 Hz
 high-pass, 0.5 ms envelope, seed on loud impacts, gate ±0.25·T, fit the grid.
 This is how the table was produced.
 
+## Matching the pallet filter to the sensor
+
+The detector only works when the pallet band-pass sits on the click energy. This
+was measured on 2 Dec 2026 by sweeping `bandPassFreq` through the running app
+(headless harness) and counting detected beats:
+
+| recording | click band | detections at 4.5 kHz | at 10–14 kHz |
+|---|---|---:|---:|
+| chamber recorder (Giroxa, Watex, Pobeda…) | ~3 kHz | full rate | full rate, level −9 dB |
+| bare piezo, direct contact | 8–13 kHz | starved | full rate |
+| freesound contact mic (28,800 bph) | high | **0.4 beats/s** | **8.0 beats/s (28,800 locks)** |
+| freesound automatic (28,800 bph) | high | 0 beats/s | 7.6 beats/s (28,800 locks) |
+| freesound pocket watch (18,000 bph) | 5.8 kHz | 5.0 beats/s | 5.0 beats/s |
+
+Consequences recorded here:
+
+- The pallet-filter slider range is **2000–16000 Hz**; the default stays 4500
+  because that is what the reference recordings were measured with.
+- The high-pass matters too: one quiet freesound clip had its click at ~700 Hz
+  and only detected with the high-pass at 300 Hz instead of 750.
+- Clicks below ~2 kHz (pocket watches recorded through air) cannot be matched at
+  all, because the band-pass minimum is 2000 Hz.
+- Chamber recordings are forgiving: Giroxa still detected 8.0 beats/s and locked
+  28,800 at every setting from 3 to 16 kHz, though the snippet peak fell from
+  0.016 to 0.006 (−9 dB) as the filter moved off its click band. A high-beat
+  movement starved at the wrong setting is the failure to watch for.
+
 ## Synthetic fixtures
 
 `test-fixtures/audio/` contains 20 s WAVs with a known **1.5 ms** beat error

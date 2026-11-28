@@ -196,7 +196,7 @@ export const AudioSettingsModal: React.FC<Props> = ({
             <input
               type="range"
               min="2000"
-              max="7000"
+              max="16000"
               step="250"
               value={localSettings.bandPassFreq}
               onChange={(e) =>
@@ -206,9 +206,13 @@ export const AudioSettingsModal: React.FC<Props> = ({
             />
             <div className="flex justify-between text-[10px] font-mono text-stone-400">
               <span>2,000 Hz</span>
-              <span>4,500 Hz (Pallet Jewel Impact)</span>
-              <span>7,000 Hz</span>
+              <span>4,500 Hz (default)</span>
+              <span>16,000 Hz</span>
             </div>
+            <p className="text-[10px] text-stone-500 font-mono">
+              Match your sensor: a resonant chamber clicks near 3 kHz, a bare piezo or
+              contact mic 8–14 kHz. A filter set too low leaves the detector on the noise floor.
+            </p>
           </div>
 
           {/* High-Pass Cutoff */}

@@ -12,6 +12,7 @@ import {
 
 export const DEFAULT_AUDIO_SETTINGS: Readonly<AudioSettings> = Object.freeze({
   deviceId: 'default',
+  autoFilter: false,
   gainMultiplier: 1,
   highPassCutoff: 750,
   bandPassFreq: 4500,

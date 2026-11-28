@@ -11,6 +11,7 @@ import {
 import {
   AcousticSignature,
   AudioSettings,
+  SensorProfile,
   BeatMeasurement,
   BphOption,
   COMMON_BPH_PRESETS,
@@ -39,6 +40,8 @@ export class AudioEngine {
   private waveformRingHead = 0;
   private waveformRingSize = 0;
   private recordingStartTime = 0;
+  private calibrationTimer: ReturnType<typeof setInterval> | null = null;
+  private isCalibrating = false;
 
   private isRunning: boolean = false;
   private isSimulating: boolean = false;
@@ -49,6 +52,7 @@ export class AudioEngine {
   public onBeat?: (beat: BeatMeasurement) => void;
   public onLevel?: (rms: number, peak: number) => void;
   public onAutoBphDetected?: (detectedBph: BphOption) => void;
+  public onSensorProfile?: (profile: SensorProfile) => void;
   public onAcousticSignature?: (signature: AcousticSignature) => void;
 
   // Initial state derived from central defaults
@@ -280,6 +284,7 @@ export class AudioEngine {
 
       this.isRunning = true;
       this.isSimulating = false;
+      this.startAutoCalibration();
       return true;
     } catch (err) {
       console.error('Error starting audio input:', err);
@@ -1289,7 +1294,68 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Sweep the pallet filter once and keep the band that actually detects the
+   * clicks. Sensors differ by more than 10 dB in where their energy sits (a
+   * chamber clicks near 3 kHz, a bare piezo or contact mic 8-14 kHz), and no
+   * single fixed filter serves both: measured on a contact-mic recording the
+   * detector found 0.4 beats/s at 4.5 kHz and 8.0 beats/s at 8 kHz.
+   *
+   * Uses detection itself as the objective rather than a spectrum estimate, so
+   * there is no circular dependency on whatever filter is currently set.
+   */
+  public startAutoCalibration(): void {
+    if (!this.audioSettings.autoFilter) return;
+    if (this.calibrationTimer !== null) clearInterval(this.calibrationTimer);
+    this.isCalibrating = true;
+    const steps = [3000, 5000, 7000, 9000, 12000, 16000];
+    const results: { hz: number; beats: number }[] = [];
+    let idx = 0;
+    let lastCount = this.beatCounter;
+    const applyStep = () => {
+      this.audioSettings = { ...this.audioSettings, bandPassFreq: steps[idx] };
+      if (this.bandPassNode && this.audioCtx) {
+        this.bandPassNode.frequency.setValueAtTime(steps[idx], this.audioCtx.currentTime);
+      }
+      lastCount = this.beatCounter;
+    };
+    applyStep();
+    this.calibrationTimer = setInterval(() => {
+      results.push({ hz: steps[idx], beats: this.beatCounter - lastCount });
+      idx += 1;
+      if (idx < steps.length) {
+        applyStep();
+        return;
+      }
+      if (this.calibrationTimer !== null) clearInterval(this.calibrationTimer);
+      this.calibrationTimer = null;
+      this.isCalibrating = false;
+      let best = results[0];
+      for (const r of results) if (r.beats > best.beats) best = r;
+      // A band with no detections means we never acquired anything; keep the
+      // stock default rather than "winning" by default.
+      if (best.beats === 0) {
+        best = { hz: this.audioSettings.bandPassFreq, beats: 0 };
+      }
+      const highPass = best.hz <= 5000 ? 400 : 750;
+      this.updateAudioSettings({ bandPassFreq: best.hz, highPassCutoff: highPass });
+      // Restart the beat grid: the sweep left the detector mid-phase.
+      this.resetDetectionState();
+      this.onSensorProfile?.({
+        bandPassFreq: best.hz,
+        highPassCutoff: highPass,
+        beatsPerSec: +(best.beats / 1.2).toFixed(2),
+        tested: results.map((r) => r.hz),
+      });
+    }, 1200);
+  }
+
   public stop() {
+    if (this.calibrationTimer !== null) {
+      clearInterval(this.calibrationTimer);
+      this.calibrationTimer = null;
+    }
+    this.isCalibrating = false;
     this.isRunning = false;
     this.isSimulating = false;
     this.stopRecording();
@@ -1455,6 +1521,7 @@ export class AudioEngine {
       source.loop = true;
       source.connect(playbackGain);
       this.recordingSource = source;
+    this.startAutoCalibration();
       this.recordingStartTime = this.audioCtx.currentTime;
       this.streamStartTime = this.audioCtx.currentTime;
       source.start(0);

@@ -18,6 +18,7 @@ import {
   WatchConfig,
   SimulatorConfig,
   ViewTab,
+  SensorProfile,
 } from './types/timegrapher';
 import {
   DEFAULT_WATCH_CONFIG,
@@ -93,6 +94,7 @@ export default function App() {
   const [isAudioModalOpen, setIsAudioModalOpen] = useState<boolean>(false);
   const [debugCopied, setDebugCopied] = useState<boolean>(false);
   const [isDebugCaptureOpen, setIsDebugCaptureOpen] = useState<boolean>(false);
+  const [sensorProfile, setSensorProfile] = useState<SensorProfile | null>(null);
 
   // Initialize Audio Engine once
   useEffect(() => {
@@ -147,6 +149,10 @@ export default function App() {
 
     engine.onAutoBphDetected = (detected) => {
       setWatchConfig((prev) => ({ ...prev, effectiveBph: detected }));
+    };
+
+    engine.onSensorProfile = (profile) => {
+      setSensorProfile(profile);
     };
 
     engine.onAcousticSignature = (sig) => {
@@ -366,6 +372,9 @@ export default function App() {
     setAudioSettings(newSettings);
     if (engineRef.current) {
       engineRef.current.updateAudioSettings(newSettings);
+      if (newSettings.autoFilter && isRunning) {
+        engineRef.current.startAutoCalibration();
+      }
       if (!isSimulating && isRunning) {
         setIsInitializing(true);
         engineRef.current.startMicrophone(newSettings.deviceId);
@@ -930,6 +939,7 @@ export default function App() {
         currentPeak={currentPeak}
         adaptiveThreshold={adaptiveThreshold}
         snrDb={snrDb}
+        sensorProfile={sensorProfile}
       />
 
       {/* Offline Status Banner */}

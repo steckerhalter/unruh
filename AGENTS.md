@@ -160,6 +160,35 @@ Offline cross-check (independent of the app): decode with `ffmpeg`, 400 Hz
 high-pass, 0.5 ms envelope, seed on loud impacts, gate ±0.25·T, fit the grid.
 This is how the table was produced.
 
+## Auto-matching the filter to the input (experimental, off by default)
+
+`AudioSettings.autoFilter` makes the engine sweep the pallet filter once per
+input start (`startAutoCalibration()`): six 1.2 s steps 3/5/7/9/12/16 kHz, count
+detected beats in each, keep the best, and reset the detection state. Detection
+itself is the objective, so there is no circular dependency on the current
+filter. The chosen band and its beat rate are shown in the Audio Settings modal
+(`onSensorProfile`).
+
+Measured with the headless harness (fake microphone fed the recordings):
+
+| input | auto-selected band | beats/s | BPH lock |
+|---|---|---:|---|
+| contact mic (28,800) | 12,000 Hz | 7.98 | 28,800 |
+| chamber: Giroxa | 5,000 Hz | 8.00 | 28,800 |
+| chamber: Watex | 7,000 Hz | 7.98 | 28,800 |
+| chamber: Pobeda | 7,000 Hz | 5.00 | 18,000 |
+| chamber: Certina | 12,000 Hz | 6.00 | 21,600 |
+| chamber: ZIM (noisy) | 5,000 Hz | 4.74 | 18,000 |
+
+Trade-off recorded: because the amplitude/lift path uses the filtered snippet,
+the chosen band shifts the readings slightly — Pobeda went from −92 s/d (bench at
+4.5 kHz) to −108 s/d with autoFilter, Certina +83 → +100. Hence the setting is
+**off by default**; it is the recommended switch for a new or unknown sensor, not
+a replacement for the measured defaults.
+
+Limits: it cannot help clicks below the 2 kHz band-pass minimum, and a signal
+that detects zero beats in every step falls back to the current band.
+
 ## Matching the pallet filter to the sensor
 
 The detector only works when the pallet band-pass sits on the click energy. This

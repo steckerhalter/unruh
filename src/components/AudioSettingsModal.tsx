@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { AudioSettings } from '../types/timegrapher';
+import { AudioSettings, SensorProfile } from '../types/timegrapher';
 import { X, Mic, Sliders, Volume2, Sparkles } from 'lucide-react';
 
 interface Props {
@@ -17,6 +17,7 @@ interface Props {
   currentPeak: number;
   adaptiveThreshold: number;
   snrDb: number | null;
+  sensorProfile: SensorProfile | null;
 }
 
 export const AudioSettingsModal: React.FC<Props> = ({
@@ -28,6 +29,7 @@ export const AudioSettingsModal: React.FC<Props> = ({
   currentPeak,
   adaptiveThreshold,
   snrDb,
+  sensorProfile,
 }) => {
   const [localSettings, setLocalSettings] = useState<AudioSettings>(settings);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
@@ -213,6 +215,21 @@ export const AudioSettingsModal: React.FC<Props> = ({
               Match your sensor: a resonant chamber clicks near 3 kHz, a bare piezo or
               contact mic 8–14 kHz. A filter set too low leaves the detector on the noise floor.
             </p>
+            <label className="flex cursor-pointer items-center gap-1.5 text-[10px] font-mono text-stone-600">
+              <input
+                type="checkbox"
+                checked={localSettings.autoFilter}
+                onChange={(e) => setLocalSettings({ ...localSettings, autoFilter: e.target.checked })}
+                className="accent-[#78350f]"
+              />
+              match the filter to the input automatically (≈7 s sweep at start)
+            </label>
+            {sensorProfile && (
+              <p className="text-[10px] font-mono text-emerald-700">
+                Auto: {sensorProfile.bandPassFreq} Hz, high-pass {sensorProfile.highPassCutoff} Hz
+                ({sensorProfile.beatsPerSec} beats/s)
+              </p>
+            )}
           </div>
 
           {/* High-Pass Cutoff */}

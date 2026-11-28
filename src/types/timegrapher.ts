@@ -42,8 +42,21 @@ export interface BeatMeasurement {
 
 export type TimeWindowSec = 15 | 30 | 60 | 300 | 900 | 3600 | 14400;
 
+/**
+ * Result of the automatic input calibration: which pallet-filter band actually
+ * detects this sensor's clicks. See AudioEngine.startAutoCalibration().
+ */
+export interface SensorProfile {
+  bandPassFreq: number;
+  highPassCutoff: number;
+  beatsPerSec: number;
+  tested: number[];
+}
+
 export interface AudioSettings {
   deviceId: string;
+  /** Sweep the pallet filter once per input start and keep the best band. */
+  autoFilter: boolean;
   gainMultiplier: number;
   highPassCutoff: number; // 200 to 2000 Hz (cuts table rumble and mains hum)
   bandPassFreq: number; // 2000 to 7000 Hz (pallet jewel resonance)

@@ -61,6 +61,10 @@ export const DebugCapturePanel: React.FC<Props> = ({ open, onClose }) => {
 
   const { config, sink, beats, pendingLines, pendingBytes, lastBeat, lastError } = stats;
   const recent = stats.recent.slice(-60);
+  const snrDb =
+    lastBeat?.peak != null && lastBeat.noise > 0
+      ? 20 * Math.log10(lastBeat.peak / lastBeat.noise)
+      : null;
   const intervals = recent.map((r) => r.dt ?? NaN);
   const lifts = recent.map((r) => r.lift);
 
@@ -132,6 +136,22 @@ export const DebugCapturePanel: React.FC<Props> = ({ open, onClose }) => {
           </div>
         </div>
 
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="text-[9px] uppercase text-stone-500">SNR (peak/noise)</span>
+          {snrDb === null ? (
+            <span className="text-stone-400">—</span>
+          ) : (
+            <span
+              className={`font-semibold ${
+                snrDb >= 40 ? 'text-emerald-700' : snrDb >= 30 ? 'text-amber-700' : 'text-rose-700'
+              }`}
+              title="~30 dB means the input chain (ADC/preamp) limits the timing, not the app"
+            >
+              {snrDb.toFixed(1)} dB
+            </span>
+          )}
+        </div>
+
         <div>
           <div className="mb-0.5 flex justify-between text-[9px] uppercase text-stone-500">
             <span>interval</span>
@@ -183,7 +203,7 @@ export const DebugCapturePanel: React.FC<Props> = ({ open, onClose }) => {
             <Download size={11} /> Save
           </button>
           <button
-            onClick={clearDebugCapture}
+            onClick={() => void clearDebugCapture()}
             title="Clear the buffer"
             className="rounded border border-[#ded5c5] bg-white px-2 py-1 text-[10px] text-stone-700 transition hover:border-rose-300 hover:text-rose-700"
           >

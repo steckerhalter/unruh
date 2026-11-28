@@ -83,6 +83,10 @@ export default function App() {
   const [currentRms, setCurrentRms] = useState<number>(0);
   const [currentPeak, setCurrentPeak] = useState<number>(0);
   const [adaptiveThreshold, setAdaptiveThreshold] = useState<number>(0.15);
+  const [snrDb, setSnrDb] = useState<number | null>(null);
+  // Peak-hold (~4 dB/s decay) so the SNR readout reflects the click, not the
+  // instantaneous sample between beats.
+  const peakHoldRef = useRef<number>(0);
   const [beatFlash, setBeatFlash] = useState<boolean>(false);
 
   // Modal states
@@ -118,6 +122,11 @@ export default function App() {
           bph: diagnostics.effectiveBph,
           noise: diagnostics.backgroundNoiseLevel,
           threshold: diagnostics.adaptiveThreshold,
+          source: diagnostics.isSimulating
+            ? diagnostics.hasRecording
+              ? 'recording'
+              : 'synth'
+            : 'mic',
         });
       }
     };
@@ -126,6 +135,14 @@ export default function App() {
       setCurrentRms(rms);
       setCurrentPeak(peak);
       setAdaptiveThreshold(engine.getAdaptiveThreshold());
+
+      peakHoldRef.current = Math.max(peak, peakHoldRef.current * 0.985);
+      const floor = engine.getBackgroundNoiseFloor();
+      setSnrDb(
+        floor > 0 && peakHoldRef.current > 0
+          ? 20 * Math.log10(peakHoldRef.current / floor)
+          : null
+      );
     };
 
     engine.onAutoBphDetected = (detected) => {
@@ -394,6 +411,16 @@ export default function App() {
     const mid = Math.floor(sorted.length / 2);
     return Math.round(sorted[mid]);
   }, [recentBeats, latestBeat]);
+
+  // Median of the per-beat amplitude confidence (± deg, from the lift IQR).
+  const liveAmpUncertainty = useMemo(() => {
+    const vals = recentBeats
+      .map((b) => b.amplitudeUncertaintyDeg)
+      .filter((v): v is number => typeof v === 'number');
+    if (vals.length === 0) return null;
+    const sorted = [...vals].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }, [recentBeats]);
 
   const liveBeatErrAvg = useMemo(() => {
     if (recentBeats.length === 0) return latestBeat ? latestBeat.beatErrorMs : 0.2;
@@ -681,6 +708,20 @@ export default function App() {
                       {isRunning || measurements.length > 0 ? (
                         <div className="text-2xl sm:text-3xl font-mono font-bold tracking-tight text-stone-900 tabular-nums">
                           {liveAmpAvg}<span className="text-sm font-normal text-stone-500 ml-0.5">°</span>
+                          {liveAmpUncertainty !== null && (
+                            <span
+                              className={`ml-1 text-[10px] font-normal align-middle ${
+                                liveAmpUncertainty <= 5
+                                  ? 'text-emerald-700'
+                                  : liveAmpUncertainty <= 15
+                                    ? 'text-amber-700'
+                                    : 'text-rose-700'
+                              }`}
+                              title="Spread of the last 16 lift times, propagated to the amplitude. Large = the drop landmark is not resolvable on this signal."
+                            >
+                              ±{liveAmpUncertainty}°
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <div className="text-2xl sm:text-3xl font-mono font-bold tracking-tight text-stone-400">
@@ -888,6 +929,7 @@ export default function App() {
         currentRms={currentRms}
         currentPeak={currentPeak}
         adaptiveThreshold={adaptiveThreshold}
+        snrDb={snrDb}
       />
 
       {/* Offline Status Banner */}

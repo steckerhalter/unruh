@@ -69,7 +69,10 @@ reintroduces jitter or wrong BPH.
    The Banking marker is the loudest peak of the main burst after the unlock
    group — not the last ring-down lobe — and the lift-time text follows it.
    The amplitude uses the median. Lift time is clamped 2.5–45 ms; amplitude
-   40–360°.
+   40–360°. Picks below 3.5 ms mean the banking peak landed back on the unlock
+   (a failed pick hidden by the clamp floor) and are **excluded from the median**;
+   on a chamber AS 1803 they were 20 % of beats and biased the median 26→17 ms,
+   i.e. the amplitude read ~15° high.
 6. **Display snippet is anchored on the unlock** with 10 ms pre-roll, so the
    waveform does not jump when a different sub-click is loudest. Only Unlock
    and Banking are marked; do not reintroduce a t2/impulse marker — it is not
@@ -192,6 +195,15 @@ Off by default. Toggle it in **Calibration & Filter → Capture**.
   `live-<timestamp>.ndjson` instead of truncating, so runs can be compared.
 - Envelope values are 0–255 *per beat*; the absolute level is in `peak`, so
   gain/contact changes stay visible.
+- **Amplitude uncertainty** `±x°` next to the amplitude comes from the IQR of
+  the 16 lift times propagated through the amplitude formula. Green ≤5°,
+  amber ≤15°, red above — on a long-ringing chamber it is tens of degrees, and
+  that is the honest reading.
+- **SNR** = `20·log10(peak / noise)`, shown live in the Audio Settings modal and
+  the capture panel. It is the practical test of an input setup: digital gain
+  scales signal and converter noise together, so a chain sitting at ~30 dB is
+  ADC/preamp-limited and needs analog gain or a 24-bit interface, not a bigger
+  `gainMultiplier`.
 - The recorder is fed from `onBeat` (already outside the ScriptProcessor
   callback). Never call it from inside the audio callback.
 

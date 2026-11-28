@@ -46,12 +46,23 @@ export const WaveformViewer: React.FC<Props> = ({ engineRef, height = 100 }) => 
         ctx.lineWidth = 1;
         ctx.beginPath();
         const n = samples.length;
-        for (let x = 0; x <= cw; x++) {
-          const i = Math.min(n - 1, Math.floor((x / cw) * n));
-          if (i < 0) continue;
-          const y = midY + samples[i] * amp;
-          if (x === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
+        // Draw the min/max of each pixel column, not a single sampled point.
+        // The ring buffer holds ~19k samples for ~1k pixels, so point-sampling
+        // aliases badly: the picture changes every redraw and a dense burst can
+        // look like noise (or vice versa). One vertical line per column shows
+        // the real envelope.
+        for (let x = 0; x < cw; x++) {
+          const a = Math.floor((x / cw) * n);
+          const b = Math.max(a + 1, Math.min(n, Math.floor(((x + 1) / cw) * n)));
+          let lo = samples[a];
+          let hi = samples[a];
+          for (let i = a + 1; i < b; i++) {
+            const v = samples[i];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+          }
+          ctx.moveTo(x + 0.5, midY - hi * amp);
+          ctx.lineTo(x + 0.5, midY - lo * amp);
         }
         ctx.stroke();
       }

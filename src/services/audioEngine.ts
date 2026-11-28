@@ -807,7 +807,7 @@ export class AudioEngine {
     this.lastBeatSampleTime = beatGlobalSample;
     this.isTickTurn = !this.isTickTurn;
 
-    const { deltaTMs, amplitude } = impulses;
+    const { deltaTMs, amplitude, ampUncertaintyDeg } = impulses;
 
     const measurement: BeatMeasurement = {
       id: this.beatCounter,
@@ -817,6 +817,7 @@ export class AudioEngine {
       rateErrorSecondsPerDay,
       beatErrorMs,
       amplitudeDeg: amplitude,
+      amplitudeUncertaintyDeg: ampUncertaintyDeg,
       isTick: this.isTickTurn,
       liftTimeMs: deltaTMs,
       unlockMs: displayUnlockMs,
@@ -867,7 +868,7 @@ export class AudioEngine {
     sampleRate: number,
     targetPeriodMs: number,
     liftAngle: number
-  ): { deltaTMs: number; amplitude: number; unlockMs: number; bankingMs: number } {
+  ): { deltaTMs: number; amplitude: number; unlockMs: number; bankingMs: number; ampUncertaintyDeg?: number } {
     const len = snippet.length;
     const win = 3;
 
@@ -980,10 +981,23 @@ export class AudioEngine {
     // amplitude, use a median span: the drop is buried in the ringing on these
     // movements, so a single beat's end-point is a noisy estimate of the lift
     // time.
-    this.recentDeltaTMs.push(deltaTMs);
-    if (this.recentDeltaTMs.length > 16) this.recentDeltaTMs.shift();
+    //
+    // A pick that lands back on the unlock is not a banking measurement at all;
+    // the 2.5 ms clamp floor hides the failure. Measured on a chamber recording
+    // of an AS 1803, 20 % of beats returned exactly that, and feeding them into
+    // the median pulled it from 26 ms down to 17 ms (i.e. the amplitude read
+    // high). Keep them out of the statistic — the marker still follows the
+    // beat, which is what the scope is for.
+    const MIN_PLAUSIBLE_LIFT_MS = 3.5;
+    if (deltaTMs > MIN_PLAUSIBLE_LIFT_MS) {
+      this.recentDeltaTMs.push(deltaTMs);
+      if (this.recentDeltaTMs.length > 16) this.recentDeltaTMs.shift();
+    }
     const sortedDeltaT = [...this.recentDeltaTMs].sort((a, b) => a - b);
-    const ampDeltaTMs = sortedDeltaT[Math.floor(sortedDeltaT.length / 2)];
+    // Fall back to this beat while the window has no plausible pick yet.
+    const ampDeltaTMs = sortedDeltaT.length > 0
+      ? sortedDeltaT[Math.floor(sortedDeltaT.length / 2)]
+      : deltaTMs;
 
     // 7. Amplitude Calculation
     const liftAngleRad = (liftAngle * Math.PI) / 180;
@@ -998,7 +1012,26 @@ export class AudioEngine {
       amplitude = Math.max(40, Math.min(360, amplitude));
     }
 
-    return { deltaTMs, amplitude, unlockMs, bankingMs };
+    // Confidence of that amplitude: the lift-time IQR propagated through the
+    // same formula. On a long-ringing chamber the IQR can span several ms,
+    // which is tens of degrees — better shown than hidden.
+    const ampFor = (dtMs: number): number | null => {
+      const s2 = Math.sin((Math.PI * dtMs) / targetPeriodMs);
+      if (!(s2 > 0.01)) return null;
+      const a2 = (liftAngleRad / (2 * s2)) * 180 / Math.PI;
+      return Math.max(40, Math.min(360, a2));
+    };
+    const n16 = sortedDeltaT.length;
+    const q1 = sortedDeltaT[Math.floor(n16 * 0.25)];
+    const q3 = sortedDeltaT[Math.floor(n16 * 0.75)];
+    const aLo = ampFor(q1);
+    const aHi = ampFor(q3);
+    const ampUncertaintyDeg =
+      n16 >= 4 && aLo !== null && aHi !== null
+        ? Math.round(Math.abs(aHi - aLo) / 2)
+        : undefined;
+
+    return { deltaTMs, amplitude, unlockMs, bankingMs, ampUncertaintyDeg };
   }
 
   /**
@@ -1395,10 +1428,32 @@ export class AudioEngine {
     }
     try {
       const decoded = await this.audioCtx.decodeAudioData(buffer);
+
+      // Program material must NOT pass through the microphone boost:
+      // gainMultiplier exists for a quiet piezo and can be 3000x, which made a
+      // normal recording arrive thousands of times over full scale. Normalise
+      // the file to a fixed peak instead, so every recording presents the same
+      // level to the detector regardless of how hot it was captured.
+      let peak = 0;
+      for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+        const data = decoded.getChannelData(ch);
+        for (let i = 0; i < data.length; i++) {
+          const v = data[i] < 0 ? -data[i] : data[i];
+          if (v > peak) peak = v;
+        }
+      }
+      const TARGET_PEAK = 0.7;
+      const norm = peak > 0 ? Math.min(4, TARGET_PEAK / peak) : 1;
+
+      const playbackGain = this.audioCtx.createGain();
+      playbackGain.gain.setValueAtTime(norm, this.audioCtx.currentTime);
+      if (this.highPassNode) playbackGain.connect(this.highPassNode);
+      else playbackGain.connect(this.gainNode);
+
       const source = this.audioCtx.createBufferSource();
       source.buffer = decoded;
       source.loop = true;
-      source.connect(this.gainNode);
+      source.connect(playbackGain);
       this.recordingSource = source;
       this.recordingStartTime = this.audioCtx.currentTime;
       this.streamStartTime = this.audioCtx.currentTime;
@@ -1419,6 +1474,16 @@ export class AudioEngine {
 
   public getIsSimulating(): boolean {
     return this.isSimulating;
+  }
+
+  /**
+   * Envelope noise floor (post-gain). The SNR readout divides the peak by this,
+   * so it must come from the same signal the peak is measured on; a chain that
+   * only has ~4 bits above the converter's LSB shows up here as a low ratio and
+   * cannot be fixed with digital gain.
+   */
+  public getBackgroundNoiseFloor(): number {
+    return this.backgroundNoiseLevel;
   }
 
   public getAdaptiveThreshold(): number {

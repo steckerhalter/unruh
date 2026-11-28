@@ -16,6 +16,7 @@ interface Props {
   currentRms: number;
   currentPeak: number;
   adaptiveThreshold: number;
+  snrDb: number | null;
 }
 
 export const AudioSettingsModal: React.FC<Props> = ({
@@ -26,6 +27,7 @@ export const AudioSettingsModal: React.FC<Props> = ({
   currentRms,
   currentPeak,
   adaptiveThreshold,
+  snrDb,
 }) => {
   const [localSettings, setLocalSettings] = useState<AudioSettings>(settings);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
@@ -115,6 +117,27 @@ export const AudioSettingsModal: React.FC<Props> = ({
               <span>0% Silence</span>
               <span className="text-amber-800 font-semibold">▲ Trigger Threshold</span>
               <span>100% Clip</span>
+            </div>
+
+            {/* Signal-to-noise: peak over the detector's noise floor. A direct
+                piezo needs ~40 dB+ here; ~30 dB means the ADC/preamp, not the
+                app, is the limit (digital gain cannot improve it). */}
+            <div className="flex items-center justify-between text-[10px] font-mono pt-0.5">
+              <span className="text-stone-500">
+                SNR (peak / noise floor):
+              </span>
+              {snrDb === null ? (
+                <span className="text-stone-400">—</span>
+              ) : (
+                <span
+                  className={`font-bold ${
+                    snrDb >= 40 ? 'text-emerald-700' : snrDb >= 30 ? 'text-amber-700' : 'text-rose-700'
+                  }`}
+                  title="Below ~30 dB the sub-click timing is limited by the input chain: raise the analog gain or use a 24-bit interface"
+                >
+                  {snrDb.toFixed(1)} dB
+                </span>
+              )}
             </div>
           </div>
 

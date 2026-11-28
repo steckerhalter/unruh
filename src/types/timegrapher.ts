@@ -29,6 +29,9 @@ export interface BeatMeasurement {
   rateErrorSecondsPerDay: number; // e.g. +14.2 s/d or -8.5 s/d
   beatErrorMs: number; // e.g. 0.2 ms
   amplitudeDeg: number; // e.g. 285°
+  /** Half the spread of the amplitude implied by the 16-beat lift IQR; undefined
+   *  when the lift distribution is too narrow/unavailable to estimate it. */
+  amplitudeUncertaintyDeg?: number;
   isTick: boolean; // Alternates tick / tock
   liftTimeMs: number; // unlock-to-banking duration
   unlockMs: number; // Unlocking edge

@@ -24,10 +24,14 @@
 
 import type { BeatMeasurement } from '../types/timegrapher';
 
+export type DebugSource = 'mic' | 'recording' | 'synth';
+
 export interface DebugBeatContext {
   bph: number;
   noise: number;
   threshold: number;
+  /** Which input produced the beat — runs are easier to compare when labelled. */
+  source: DebugSource;
 }
 
 export interface DebugBeatRecord {
@@ -45,6 +49,7 @@ export interface DebugBeatRecord {
   banking: number; // display-snippet offset, ms
   lift: number; // unlock -> banking for this beat, ms
   bph: number;
+  src: DebugSource;
   noise: number;
   thr: number;
   peak?: number; // absolute envelope peak of the snippet
@@ -109,7 +114,8 @@ let lastAudioTs: number | null = null;
 let lastBeat: DebugBeatRecord | null = null;
 let recent: DebugBeatRecord[] = [];
 let flushTimer: ReturnType<typeof setInterval> | null = null;
-let flushInFlight = false;
+// Shared so callers (Clear) can wait for an in-flight POST instead of racing it.
+let flushPromise: Promise<void> | null = null;
 
 function loadConfig(): DebugCaptureConfig {
   // Persisted so a reload keeps capturing; the toggle is explicit and the sink
@@ -268,6 +274,7 @@ export function recordDebugBeat(beat: BeatMeasurement, ctx: DebugBeatContext): v
     banking: +beat.bankingMs.toFixed(2),
     lift: +beat.liftTimeMs.toFixed(2),
     bph: ctx.bph,
+    src: ctx.source,
     noise: +ctx.noise.toFixed(5),
     thr: +ctx.threshold.toFixed(5),
   };
@@ -296,35 +303,41 @@ export function recordDebugBeat(beat: BeatMeasurement, ctx: DebugBeatContext): v
   if (lines.length >= MAX_PENDING) void flush();
 }
 
-async function flush(): Promise<void> {
-  if (lines.length === 0 || flushInFlight) return;
+function flush(): Promise<void> {
+  // Awaiting an in-flight flush is what makes Stop -> Clear deterministic:
+  // without it the reset POST could rotate the file before the last batch
+  // lands, splitting a run across two files.
+  if (flushPromise) return flushPromise;
+  if (lines.length === 0) return Promise.resolve();
   if (!import.meta.env.DEV) {
     sink = config.enabled ? 'buffering' : sink;
-    return;
+    return Promise.resolve();
   }
 
   const batch = lines;
   lines = [];
-  flushInFlight = true;
-  try {
-    const res = await fetch(devSinkUrl, {
-      method: 'POST',
-      body: batch.join('\n') + '\n',
-      keepalive: true,
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    sink = config.enabled ? 'live' : 'off';
-    lastError = null;
-  } catch (err) {
-    // Keep the lines: the panel can still download them, which is the whole
-    // point when the dev server is not running.
-    lines = batch.concat(lines);
-    trimBuffer();
-    sink = config.enabled ? 'buffering' : 'off';
-    lastError = err instanceof Error ? err.message : String(err);
-  } finally {
-    flushInFlight = false;
-  }
+  flushPromise = (async () => {
+    try {
+      const res = await fetch(devSinkUrl, {
+        method: 'POST',
+        body: batch.join('\n') + '\n',
+        keepalive: true,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      sink = config.enabled ? 'live' : 'off';
+      lastError = null;
+    } catch (err) {
+      // Keep the lines: the panel can still download them, which is the whole
+      // point when the dev server is not running.
+      lines = batch.concat(lines);
+      trimBuffer();
+      sink = config.enabled ? 'buffering' : 'off';
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+  })().finally(() => {
+    flushPromise = null;
+  });
+  return flushPromise;
 }
 
 export function getDebugCaptureStats(): DebugCaptureStats {
@@ -362,12 +375,16 @@ export function downloadDebugLog(): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function clearDebugCapture(): void {
-  // Rotate the dev sink file too, so the next run is not appended to this one.
+export async function clearDebugCapture(): Promise<void> {
+  // Ship everything first, then rotate — so the run that was just stopped is
+  // complete in the rotated file and the next run starts from an empty one.
+  await flush();
   if (import.meta.env.DEV) {
-    void fetch(`${devSinkUrl}/reset`, { method: 'POST' }).catch(() => {
+    try {
+      await fetch(`${devSinkUrl}/reset`, { method: 'POST' });
+    } catch {
       /* sink unavailable: the in-memory buffer is still cleared below */
-    });
+    }
   }
   lines = [];
   beats = 0;
